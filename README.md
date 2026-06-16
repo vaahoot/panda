@@ -27,7 +27,7 @@ The bot expects three API keys in your environment variables:
 
 ```OPENAI_API_KEY``` - OpenAI API token.
 
-Additionaly I'm using Pillow to create the image of the deck that the bot then sends to the chat.
+Additionally I'm using Pillow to create the image of the deck that the bot then sends to the chat.
 
 ## Installation and Running the bot
 Clone the repo:
