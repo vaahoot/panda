@@ -6,4 +6,5 @@ __pycache__/
 temp.*
 preferences.json
 bot.log
+.env
 
