@@ -72,8 +72,10 @@ The image should be a screenshot of the battle, an API call is made to chatGPT t
 ```
 Saves this channel as an image channel. In every image channel, the bot will try to search for a deck for every image sent, useful if you want to have a dedicated channel in which you can just send screenshots and get decks without the `!i` command to save time.
 
-```!gpt <version>```
-Choses a GPT version to use on the server. Running this command without the version attribute will return the currently chosen version.
+```
+!gpt <version>
+```
+Chooses a GPT version to use on the server. Running this command without the version attribute will return the currently chosen version.
 
 ## Limitations
 1. Unfortunately, Playwright cannot be used headless because RoyaleAPI blocks headless browsers.
