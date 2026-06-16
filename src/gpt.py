@@ -1,11 +1,14 @@
-from openai import AsyncOpenAI
-from openai import APIStatusError
-
-from config import PROMPT, GPT_DEFAULT_VERSION
-import json
 import asyncio
+import base64
+import json
 
-async def extract_player_info(client: AsyncOpenAI, image_url: str, version: str = GPT_DEFAULT_VERSION, retries: int = 3) -> dict | None:
+from openai import APIStatusError, AsyncOpenAI
+
+from config import GPT_DEFAULT_VERSION, PROMPT
+
+
+async def extract_player_info(client: AsyncOpenAI, image_bytes: bytes, version: str = GPT_DEFAULT_VERSION, retries: int = 3) -> dict | None:
+    b64 = base64.b64encode(image_bytes).decode("utf-8")
     for attempt in range(retries):
         try:
             response = await client.chat.completions.create(
@@ -15,7 +18,7 @@ async def extract_player_info(client: AsyncOpenAI, image_url: str, version: str 
                         "role": "user",
                         "content": [
                             {"type": "text", "text": PROMPT},
-                            {"type": "image_url", "image_url": {"url": image_url}},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
                         ],
                     }
                 ],

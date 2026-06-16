@@ -13,17 +13,19 @@ DISCORD_API_KEY = os.getenv("DISCORD_KEY")
 
 GPT_DEFAULT_VERSION = "gpt-4o"
 
-PROMPT = """You are analyzing a Clash Royale matchmaking screen. Two players are shown battling.
-Extract the name and clan of the OPPONENT only. The opponent is the player on the TOP half of the screen.
-The opponent's player name appears prominently in gold or white text. Directly below it is their clan name in a smaller, yellowish font. Below the clan name is their King level.
+PROMPT = """You are analyzing a cropped section of a Clash Royale game screen showing a single player's information.
+Extract the player name and clan name from the image.
+The player name appears to the right of the shield icon. The clan name is smaller and appears directly below the player name in a yellowish colour.
 Return ONLY a valid JSON object with no markdown, no explanation, no code blocks:
 {"name": "player_name", "clan": "clan_name"}
 Rules:
 - If no clan is visible, set clan to null
-- If this is not a Clash Royale matchmaking screen, return {"name": null, "clan": null}
-- Preserve the exact spelling and capitalisation of the name and clan
-- Do not confuse the bottom player (you) with the top player (opponent)
-- If you are uncertain about specific characters, stop the name or clan at the point where you become uncertain rather than guessing. A truncated name is better than one with incorrect characters."""
+- If you cannot read the name, return {"name": null, "clan": null}
+- Preserve exact spelling and capitalisation
+- If you are uncertain about specific characters, output the largest substring you are certain about"""
 
-PREFERENCES = Path(__file__).parent.parent / "preferences.json"
-LOGS = Path(__file__).parent.parent / "bot.log"
+ROOT = Path(__file__).parent.parent
+
+PREFERENCES = ROOT / "preferences.json"
+LOGS = ROOT / "bot.log"
+SHIELD_TEMPLATE = ROOT / "assets/shield.png"

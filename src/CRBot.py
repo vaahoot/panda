@@ -7,9 +7,10 @@ from playwright.async_api import Browser, Playwright, async_playwright
 
 import helper
 import search
-from gpt import extract_player_info
-from config import GPT_DEFAULT_VERSION
+from config import GPT_DEFAULT_VERSION, SHIELD_TEMPLATE
+from crop import load_template, process_image
 from deck import build_deck_image
+from gpt import extract_player_info
 from helper import load_preferences, print_error, print_info, save_preferences
 
 
@@ -19,6 +20,7 @@ class CRBot(commands.Bot):
         self.browser: Browser | None = None
         self.playwright: Playwright | None = None
         self.gpt_client = gpt_client
+        self.template_gray, self.mask = load_template(SHIELD_TEMPLATE)
 
     async def setup_hook(self):
         self.playwright = await async_playwright().start()
@@ -70,7 +72,8 @@ class CRBot(commands.Bot):
             gpt_version = preferences.setdefault("gptVersion", GPT_DEFAULT_VERSION )
 
             await print_info(f"Link sent to GPT: {url}")
-            player_info = await extract_player_info(self.gpt_client, url, gpt_version)
+            image_bytes = await process_image(url, self.template_gray, self.mask)
+            player_info = await extract_player_info(self.gpt_client, image_bytes, gpt_version)
 
             if not player_info:
                 await message.reply("Internal Error")
