@@ -25,7 +25,12 @@ Rules:
 - If you are uncertain about specific characters, output the largest substring you are certain about"""
 
 ROOT = Path(__file__).parent.parent
+ASSETS = ROOT / "assets/"
+IMAGES = ASSETS / "images/"
+FONTS = ASSETS / "fonts/"
 
 PREFERENCES = ROOT / "preferences.json"
 LOGS = ROOT / "bot.log"
-SHIELD_TEMPLATE = ROOT / "assets/shield.png"
+SHIELD_TEMPLATE = IMAGES / "shield.png"
+DROPLET = IMAGES / "elixir-droplet.png"
+FONT = FONTS / "lilita.ttf"
