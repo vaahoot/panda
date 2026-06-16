@@ -1,11 +1,12 @@
+import asyncio
+
 import discord
 from openai import AsyncOpenAI
+from pyvirtualdisplay.display import Display
 
 from config import DISCORD_API_KEY, GPT_DEFAULT_VERSION
 from CRBot import CRBot
 from helper import print_error, print_info
-
-from pyvirtualdisplay.display import Display
 
 if not DISCORD_API_KEY:
     raise ValueError("API key not found")
@@ -15,8 +16,12 @@ browser = None
 intents = discord.Intents.default()
 intents.message_content = True
 
-display = Display(visible=False, size=(1920, 1080))
-display.start()
+try:
+    display = Display(visible=False, size=(1920, 1080))
+    display.start()
+    asyncio.run(print_info(f"Virtual Display: {display}"))
+except FileNotFoundError:
+    asyncio.run(print_info("Xvfb not available, using built in screen"))
 
 ai_client = AsyncOpenAI()
 bot = CRBot(command_prefix="!", intents=intents, gpt_client=ai_client)
