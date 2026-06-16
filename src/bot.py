@@ -5,6 +5,8 @@ from config import DISCORD_API_KEY, GPT_DEFAULT_VERSION
 from CRBot import CRBot
 from helper import print_error, print_info
 
+from pyvirtualdisplay.display import Display
+
 if not DISCORD_API_KEY:
     raise ValueError("API key not found")
 
@@ -12,6 +14,9 @@ browser = None
 
 intents = discord.Intents.default()
 intents.message_content = True
+
+display = Display(visible=False, size=(1920, 1080))
+display.start()
 
 ai_client = AsyncOpenAI()
 bot = CRBot(command_prefix="!", intents=intents, gpt_client=ai_client)
@@ -56,11 +61,19 @@ async def image(ctx):
 
 # Command to set the channel in which !i is not needed for the bot to start searching by screenshot.
 @bot.command()
-async def image_channel(ctx, state: str):
+async def image_channel(ctx, state: str | None = None):
     guild_preferences = bot.get_preferences(ctx.guild.id)
     channels = guild_preferences.setdefault("imageChannels", [])
 
     channel = ctx.channel
+
+    if not state:
+        if channel.id in channels:
+            await ctx.send(f"{channel.name} is an image channel")
+        else:
+            await ctx.send(f"{channel.name} is not an image channel")
+
+        return
 
     if state.lower() == "on":
         if channel.id in channels:

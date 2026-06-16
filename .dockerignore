@@ -1,11 +1,8 @@
+*.pyc
+.git
 .DS_Store
-
 .venv/
 __pycache__/
-
-*.pyc
 temp.*
-preferences.json
-bot.log
 .env
 
