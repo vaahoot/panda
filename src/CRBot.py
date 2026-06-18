@@ -35,6 +35,7 @@ class CRBot(commands.Bot):
         await print_info(f"Database connected: {self.db.connection}")
 
     async def on_ready(self):
+        await self.change_presence(activity=discord.Activity(type=discord.ActivityType.competing, name="Guessing Clash Royale decks"))
         for guild in self.guilds:
             await self.db.add_guild(guild)
 
