@@ -8,4 +8,4 @@ services:
 
     volumes:
       - ./bot.log:/app/bot.log
-      - ./preferences.json:/app/preferences.json
+      - ./bot.db:/app/bot.db

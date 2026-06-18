@@ -1,10 +1,11 @@
 import asyncio
 
 import discord
+from discord.ext import commands
 from openai import AsyncOpenAI
 from pyvirtualdisplay.display import Display
 
-from config import DISCORD_API_KEY, GPT_DEFAULT_VERSION
+from config import DISCORD_API_KEY
 from CRBot import CRBot
 from helper import print_error, print_info
 
@@ -14,6 +15,7 @@ if not DISCORD_API_KEY:
 browser = None
 
 intents = discord.Intents.default()
+intents.members = True
 intents.message_content = True
 
 try:
@@ -64,62 +66,35 @@ async def image(ctx):
     await bot.search_by_image(ctx.message)
 
 
-# Command to set the channel in which !i is not needed for the bot to start searching by screenshot.
-@bot.command()
+@bot.command(aliases=["ic"])
+@commands.guild_only()
 async def image_channel(ctx, state: str | None = None):
-    guild_preferences = bot.get_preferences(ctx.guild.id)
-    channels = guild_preferences.setdefault("imageChannels", [])
-
+    guild = ctx.guild
     channel = ctx.channel
 
     if not state:
-        if channel.id in channels:
-            await ctx.send(f"{channel.name} is an image channel")
+        image_channel = await bot.db.is_image_channel(channel, guild)
+        if image_channel:
+            await ctx.send(f"Channel {channel.name} is an image channel")
         else:
-            await ctx.send(f"{channel.name} is not an image channel")
+            await ctx.send(f"Channel {channel.name} is not an image channel")
 
         return
 
     if state.lower() == "on":
-        if channel.id in channels:
-            await ctx.reply(f"{channel.name} is already an image channel")
-            return
-
-        channels.append(channel.id)
-        await bot.save_preferences()
-        await print_info(
-            f"Channel: {channel.name}, ID: {channel.id} was added to the image channels list"
-        )
-        await ctx.reply(f"Channel {channel.name} set as image channel")
-
+        add = await bot.db.add_image_channel(guild, channel)
+        if add:
+            await ctx.send(f"Channel {channel.name} is now an image channel")
+        else:
+            await ctx.send(f"Channel {channel.name} was already an image channel")
     elif state.lower() == "off":
-        if channel.id not in channels:
-            await ctx.reply(f"Channel {channel.name} wasn't an image channel")
-            return
-
-        channels.remove(channel.id)
-        await bot.save_preferences()
-        await print_info(
-            f"Channel: {channel.name}, ID: {channel.id} was removed from the image channels list"
-        )
-        await ctx.send(f"Channel {channel.name} is no longer an image channel")
-
+        remove = await bot.db.remove_image_channel(guild, channel)
+        if remove:
+            await ctx.send(f"Channel {channel.name} is no longer an image channel")
+        else:
+            await ctx.send(f"Channel {channel.name} wasn't an image channel")
     else:
-        await ctx.reply("Invalid state")
-
-
-@bot.command()
-async def gpt(ctx, version: str | None = None):
-    guild_preferences = bot.get_preferences(ctx.guild.id)
-    current_version = guild_preferences.setdefault("gptVersion", GPT_DEFAULT_VERSION)
-
-    if not version:
-        await ctx.send(f"You are using: {current_version}")
-    else:
-        guild_preferences["gptVersion"] = version
-
-        await bot.save_preferences()
-        await ctx.send(f"GPT version set to: {version}")
+        await ctx.reply(f"Invalid state {state}")
 
 
 bot.run(DISCORD_API_KEY)

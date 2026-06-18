@@ -28,9 +28,11 @@ ROOT = Path(__file__).parent.parent
 ASSETS = ROOT / "assets/"
 IMAGES = ASSETS / "images/"
 FONTS = ASSETS / "fonts/"
+DB = ROOT / "db"
 
-PREFERENCES = ROOT / "preferences.json"
 LOGS = ROOT / "bot.log"
 SHIELD_TEMPLATE = IMAGES / "shield.png"
 DROPLET = IMAGES / "elixir-droplet.png"
 FONT = FONTS / "lilita.ttf"
+DATABASE = ROOT / "bot.db"
+SCHEMA = DB / "schema.sql"

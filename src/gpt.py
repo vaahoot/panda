@@ -7,12 +7,12 @@ from openai import APIStatusError, AsyncOpenAI
 from config import GPT_DEFAULT_VERSION, PROMPT
 
 
-async def extract_player_info(client: AsyncOpenAI, image_bytes: bytes, version: str = GPT_DEFAULT_VERSION, retries: int = 3) -> dict | None:
+async def extract_player_info(client: AsyncOpenAI, image_bytes: bytes, retries: int = 3) -> dict | None:
     b64 = base64.b64encode(image_bytes).decode("utf-8")
     for attempt in range(retries):
         try:
             response = await client.chat.completions.create(
-                model=version,
+                model=GPT_DEFAULT_VERSION,
                 messages=[
                     {
                         "role": "user",

@@ -1,6 +1,4 @@
 import datetime
-import json
-import os
 import re
 import unicodedata
 
@@ -8,7 +6,7 @@ import aiofiles
 from colorama import Fore, Style
 from playwright.async_api import Browser, Playwright
 
-from config import LOGS, PREFERENCES
+from config import LOGS
 
 
 async def init_browser(playwright: Playwright) -> Browser:
@@ -42,15 +40,3 @@ async def print_info(msg):
 
 async def print_error(msg):
     await log(msg, Fore.RED, "ERROR")
-
-
-def load_preferences() -> dict:
-    if not os.path.exists(PREFERENCES):
-        return {}
-    with open(PREFERENCES, "r") as f:
-        return json.load(f)
-
-
-async def save_preferences(data: dict) -> None:
-    async with aiofiles.open(PREFERENCES, "w") as f:
-        await f.write(json.dumps(data))
