@@ -1,5 +1,8 @@
 import os
+from dotenv import load_dotenv
 from pathlib import Path
+
+load_dotenv()
 
 ROYALE_API_PLAYER_SEARCH = "https://royaleapi.com/player/search/results?q={0}"
 ROYALE_API_CLAN_SEARCH = "https://royaleapi.com/clans/search?name={0}"
