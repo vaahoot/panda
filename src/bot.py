@@ -32,7 +32,7 @@ bot = CRBot(command_prefix="!", intents=intents, gpt_client=ai_client)
 # Command to find player's deck by name and clan
 @bot.command(aliases=["d"])
 async def deck(ctx):
-    if not bot.browser:
+    if not bot.context:
         await print_error("No browser is initialized")
         await ctx.reply("Internal Error")
         return
@@ -58,7 +58,7 @@ async def deck(ctx):
 # Command to find player's deck by an image
 @bot.command(aliases=["i"])
 async def image(ctx):
-    if not bot.browser:
+    if not bot.context:
         await print_error("No browser is initialized")
         await ctx.reply("Internal Error")
         return

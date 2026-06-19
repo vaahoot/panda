@@ -1,6 +1,6 @@
 import aiohttp
 import bs4
-from playwright.async_api import Browser, Route
+from playwright.async_api import BrowserContext
 from config import (
     CLASH_API_BATTLE_LOG,
     CLASH_API_CLAN_MEMBERS,
@@ -12,18 +12,8 @@ from deck import get_last_deck
 from helper import normalise, print_info
 
 
-async def block_resources(route: Route):
-    blocked = ["image", "stylesheet", "font", "media"]
-
-    if route.request.resource_type in blocked:
-        await route.abort()
-    else:
-        await route.continue_()
-
-
-async def search(browser: Browser, link: str, selector: str) -> str:
-    page = await browser.new_page()
-    await page.route("**/*", block_resources)
+async def search(context: BrowserContext, link: str, selector: str) -> str:
+    page = await context.new_page()
 
     await page.goto(link)
     await page.wait_for_selector(selector)
@@ -33,16 +23,16 @@ async def search(browser: Browser, link: str, selector: str) -> str:
     return html
 
 
-async def search_player_by_name(browser: Browser, name: str) -> str:
+async def search_player_by_name(context: BrowserContext, name: str) -> str:
     link = ROYALE_API_PLAYER_SEARCH.format(name)
     search_result_selector = ".player_search_results__container"
-    return await search(browser, link, search_result_selector)
+    return await search(context, link, search_result_selector)
 
 
-async def search_clans_by_name(browser: Browser, clan: str) -> str:
+async def search_clans_by_name(context: BrowserContext, clan: str) -> str:
     link = ROYALE_API_CLAN_SEARCH.format(clan)
     search_result_selector = ".three.doubling.stackable.cards"
-    return await search(browser, link, search_result_selector)
+    return await search(context, link, search_result_selector)
 
 
 def parse_players(html: str) -> list[dict]:
@@ -136,8 +126,8 @@ async def search_player_in_clans(clans: list[str], name: str) -> str | None:
     return None
 
 
-async def find_deck_by_name(browser: Browser, name: str, clan: str | None) -> list[dict[str, str]] | None:
-    search_players = await search_player_by_name(browser, name)
+async def find_deck_by_name(context: BrowserContext, name: str, clan: str | None) -> list[dict[str, str]] | None:
+    search_players = await search_player_by_name(context, name)
     players = parse_players(search_players)
     player_tag = find_player_tag(players, clan)
 
@@ -149,8 +139,8 @@ async def find_deck_by_name(browser: Browser, name: str, clan: str | None) -> li
     return get_last_deck(data)
 
 
-async def find_deck_by_clan(browser: Browser, name: str, clan: str) -> list[dict[str, str]] | None:
-    search_clans = await search_clans_by_name(browser, clan)
+async def find_deck_by_clan(context: BrowserContext, name: str, clan: str) -> list[dict[str, str]] | None:
+    search_clans = await search_clans_by_name(context, clan)
     clans = parse_clans(search_clans)
     member_tag = await search_player_in_clans(clans, name)
 
@@ -162,13 +152,13 @@ async def find_deck_by_clan(browser: Browser, name: str, clan: str) -> list[dict
     return get_last_deck(data)
 
 
-async def find_deck(browser: Browser, name: str, clan: str | None) -> list[dict[str, str]] | None:
+async def find_deck(context: BrowserContext, name: str, clan: str | None) -> list[dict[str, str]] | None:
     if not clan:
-        return await find_deck_by_name(browser, name, clan)
+        return await find_deck_by_name(context, name, clan)
 
-    deck = await find_deck_by_name(browser, name, clan)
+    deck = await find_deck_by_name(context, name, clan)
     if not deck:
-        deck = await find_deck_by_clan(browser, name, clan)
+        deck = await find_deck_by_clan(context, name, clan)
 
     if not deck:
         await print_info(f"Player {name} not found")

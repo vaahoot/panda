@@ -4,16 +4,21 @@ import unicodedata
 
 import aiofiles
 from colorama import Fore, Style
-from playwright.async_api import Browser, Playwright
+from playwright.async_api import BrowserContext, Playwright
 
-from config import LOGS
+from config import LOGS, PROFILE
 
 
-async def init_browser(playwright: Playwright) -> Browser:
+async def init_context(playwright: Playwright) -> BrowserContext:
     chromium = playwright.chromium
-    browser = await chromium.launch(headless=False)
 
-    return browser
+    context = await chromium.launch_persistent_context(
+        PROFILE,
+        headless=False,
+        args=["--disable-blink-features=AutomationControlled"],
+    )
+
+    return context
 
 
 def normalise(text: str) -> str:

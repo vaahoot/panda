@@ -4,7 +4,7 @@ import time
 import discord
 from discord.ext import commands
 from discord.ext.commands.errors import NoPrivateMessage
-from playwright.async_api import Browser, Playwright, async_playwright
+from playwright.async_api import BrowserContext, Playwright, async_playwright
 
 import helper
 import search
@@ -19,7 +19,7 @@ from helper import print_error, print_info
 class CRBot(commands.Bot):
     def __init__(self, command_prefix, intents, gpt_client):
         super().__init__(command_prefix, intents=intents)
-        self.browser: Browser | None = None
+        self.context: BrowserContext | None = None
         self.playwright: Playwright | None = None
         self.db = Database(DATABASE, SCHEMA)
         self.gpt_client = gpt_client
@@ -28,8 +28,8 @@ class CRBot(commands.Bot):
     async def setup_hook(self):
         self.playwright = await async_playwright().start()
         await print_info(f"Created playwright: {self.playwright}")
-        self.browser = await helper.init_browser(self.playwright)
-        await print_info(f"Created a browser: {self.browser}")
+        self.context = await helper.init_context(self.playwright)
+        await print_info(f"Created a browser: {self.context}")
 
         await self.db.connect()
         await print_info(f"Database connected: {self.db.connection}")
@@ -65,8 +65,8 @@ class CRBot(commands.Bot):
         await self.db.remove_guild(guild)
 
     async def close(self):
-        if self.browser:
-            await self.browser.close()
+        if self.context:
+            await self.context.close()
             await print_info("Closed browser")
         if self.playwright:
             await self.playwright.stop()
@@ -83,7 +83,7 @@ class CRBot(commands.Bot):
             raise error
 
     async def search_by_info(self, name: str, clan: str | None, message):
-        assert self.browser is not None
+        assert self.context is not None
 
         start = time.time()
 
@@ -91,7 +91,7 @@ class CRBot(commands.Bot):
         channel = message.channel
 
         async with channel.typing():
-            deck = await search.find_deck(self.browser, name, clan)
+            deck = await search.find_deck(self.context, name, clan)
 
             if not deck:
                 await message.reply("No deck found")
@@ -109,7 +109,7 @@ class CRBot(commands.Bot):
         await print_info(f"Search by info took {time_taken:.2f}s")
 
     async def search_by_image(self, message):
-        assert self.browser is not None
+        assert self.context is not None
 
         start = time.time()
 
