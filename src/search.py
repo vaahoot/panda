@@ -1,38 +1,81 @@
 import aiohttp
 import bs4
-from playwright.async_api import BrowserContext
 from config import (
     CLASH_API_BATTLE_LOG,
     CLASH_API_CLAN_MEMBERS,
     CLASH_API_HEADERS,
+    FLARESOLVERR_TIMEOUT_MS,
+    FLARESOLVERR_URL,
     ROYALE_API_CLAN_SEARCH,
     ROYALE_API_PLAYER_SEARCH,
 )
 from deck import get_last_deck
 from helper import normalise, print_info
 
-
-async def search(context: BrowserContext, link: str, selector: str) -> str:
-    page = await context.new_page()
-
-    await page.goto(link)
-    await page.wait_for_selector(selector)
-    html = await page.inner_html(selector)
-
-    await page.close()
-    return html
+FLARESOLVERR_SESSION = "crbot"
 
 
-async def search_player_by_name(context: BrowserContext, name: str) -> str:
+async def create_flaresolverr_session() -> None:
+    async with aiohttp.ClientSession() as http:
+        async with http.post(
+            FLARESOLVERR_URL,
+            json={"cmd": "sessions.create", "session": FLARESOLVERR_SESSION},
+        ) as response:
+            response.raise_for_status()
+    await print_info(f"Created FlareSolverr session: {FLARESOLVERR_SESSION}")
+
+    async with aiohttp.ClientSession() as http:
+        async with http.post(
+            FLARESOLVERR_URL,
+            json={
+                "cmd": "request.get",
+                "url": "https://royaleapi.com/",
+                "session": FLARESOLVERR_SESSION,
+                "maxTimeout": FLARESOLVERR_TIMEOUT_MS,
+            },
+        ) as response:
+            response.raise_for_status()
+    await print_info("Warmed up RoyaleAPI Cloudflare cookies")
+
+
+async def destroy_flaresolverr_session() -> None:
+    async with aiohttp.ClientSession() as http:
+        async with http.post(
+            FLARESOLVERR_URL,
+            json={"cmd": "sessions.destroy", "session": FLARESOLVERR_SESSION},
+        ) as response:
+            response.raise_for_status()
+
+
+async def search(link: str, selector: str) -> str:
+    payload = {
+        "cmd": "request.get",
+        "url": link,
+        "session": FLARESOLVERR_SESSION,
+        "maxTimeout": FLARESOLVERR_TIMEOUT_MS,
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(FLARESOLVERR_URL, json=payload) as response:
+            response.raise_for_status()
+            data = await response.json()
+
+    solution = data.get("solution") or {}
+    html = solution.get("response", "")
+    soup = bs4.BeautifulSoup(html, "html.parser")
+    element = soup.select_one(selector)
+    return element.decode_contents() if element else ""
+
+
+async def search_player_by_name(name: str) -> str:
     link = ROYALE_API_PLAYER_SEARCH.format(name)
     search_result_selector = ".player_search_results__container"
-    return await search(context, link, search_result_selector)
+    return await search(link, search_result_selector)
 
 
-async def search_clans_by_name(context: BrowserContext, clan: str) -> str:
+async def search_clans_by_name(clan: str) -> str:
     link = ROYALE_API_CLAN_SEARCH.format(clan)
     search_result_selector = ".three.doubling.stackable.cards"
-    return await search(context, link, search_result_selector)
+    return await search(link, search_result_selector)
 
 
 def parse_players(html: str) -> list[dict]:
@@ -126,8 +169,8 @@ async def search_player_in_clans(clans: list[str], name: str) -> str | None:
     return None
 
 
-async def find_deck_by_name(context: BrowserContext, name: str, clan: str | None) -> list[dict[str, str]] | None:
-    search_players = await search_player_by_name(context, name)
+async def find_deck_by_name(name: str, clan: str | None) -> list[dict[str, str]] | None:
+    search_players = await search_player_by_name(name)
     players = parse_players(search_players)
     player_tag = find_player_tag(players, clan)
 
@@ -139,8 +182,8 @@ async def find_deck_by_name(context: BrowserContext, name: str, clan: str | None
     return get_last_deck(data)
 
 
-async def find_deck_by_clan(context: BrowserContext, name: str, clan: str) -> list[dict[str, str]] | None:
-    search_clans = await search_clans_by_name(context, clan)
+async def find_deck_by_clan(name: str, clan: str) -> list[dict[str, str]] | None:
+    search_clans = await search_clans_by_name(clan)
     clans = parse_clans(search_clans)
     member_tag = await search_player_in_clans(clans, name)
 
@@ -152,13 +195,13 @@ async def find_deck_by_clan(context: BrowserContext, name: str, clan: str) -> li
     return get_last_deck(data)
 
 
-async def find_deck(context: BrowserContext, name: str, clan: str | None) -> list[dict[str, str]] | None:
+async def find_deck(name: str, clan: str | None) -> list[dict[str, str]] | None:
     if not clan:
-        return await find_deck_by_name(context, name, clan)
+        return await find_deck_by_name(name, clan)
 
-    deck = await find_deck_by_name(context, name, clan)
+    deck = await find_deck_by_name(name, clan)
     if not deck:
-        deck = await find_deck_by_clan(context, name, clan)
+        deck = await find_deck_by_clan(name, clan)
 
     if not deck:
         await print_info(f"Player {name} not found")

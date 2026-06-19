@@ -1,29 +1,16 @@
-import asyncio
-
 import discord
 from discord.ext import commands
 from openai import AsyncOpenAI
-from pyvirtualdisplay.display import Display
 
 from config import DISCORD_API_KEY
 from CRBot import CRBot
-from helper import print_error, print_info
 
 if not DISCORD_API_KEY:
     raise ValueError("API key not found")
 
-browser = None
-
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
-
-try:
-    display = Display(visible=False, size=(1920, 1080))
-    display.start()
-    asyncio.run(print_info(f"Virtual Display: {display}"))
-except FileNotFoundError:
-    asyncio.run(print_info("Xvfb not available, using built in screen"))
 
 ai_client = AsyncOpenAI()
 bot = CRBot(command_prefix="!", intents=intents, gpt_client=ai_client)
@@ -32,11 +19,6 @@ bot = CRBot(command_prefix="!", intents=intents, gpt_client=ai_client)
 # Command to find player's deck by name and clan
 @bot.command(aliases=["d"])
 async def deck(ctx):
-    if not bot.context:
-        await print_error("No browser is initialized")
-        await ctx.reply("Internal Error")
-        return
-
     message = ctx.message.content
     message_without_command = message[2:]
 
@@ -58,11 +40,6 @@ async def deck(ctx):
 # Command to find player's deck by an image
 @bot.command(aliases=["i"])
 async def image(ctx):
-    if not bot.context:
-        await print_error("No browser is initialized")
-        await ctx.reply("Internal Error")
-        return
-
     await bot.search_by_image(ctx.message)
 
 

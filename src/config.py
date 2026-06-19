@@ -14,6 +14,9 @@ CLASH_API_HEADERS = {"Authorization": f"Bearer {CLASH_API_KEY}"}
 
 DISCORD_API_KEY = os.getenv("DISCORD_KEY")
 
+FLARESOLVERR_URL = os.getenv("FLARESOLVERR_URL", "http://localhost:8191/v1")
+FLARESOLVERR_TIMEOUT_MS = 60000
+
 GPT_DEFAULT_VERSION = "gpt-4o"
 
 PROMPT = """You are analyzing a cropped section of a Clash Royale game screen showing a single player's information.
@@ -35,7 +38,6 @@ DB = ROOT / "db"
 
 LOGS = ROOT / "bot.log"
 DATABASE = ROOT / "bot.db"
-PROFILE = ROOT / "browser_profile/"
 SHIELD_TEMPLATE = IMAGES / "shield.png"
 DROPLET = IMAGES / "elixir-droplet.png"
 FONT = FONTS / "lilita.ttf"

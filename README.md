@@ -18,7 +18,7 @@
 ## What it does
 This bot uses `RoyaleAPI` and official `Clash Royale API` to find a player by their nickname and clan. Then it outputs the deck they played last, which is likely to be the deck they are playing right now.
 
-I am using Python with Playwright to search by nickname/clan on RoyaleAPI since the official API only lets you find a player by their tag.
+I am using Python to scrape RoyaleAPI for nickname/clan search since the official API only lets you find a player by their tag. RoyaleAPI sits behind Cloudflare, so the bot routes its requests through a [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) instance that handles the challenge once and reuses the resulting browser session.
 The bot expects three API keys in your environment variables:
 
 ```CR_KEY``` - Clash Royale API key.
@@ -48,10 +48,20 @@ export DISCORD_KEY="your_discord_bot_token"
 export OPENAI_API_KEY="your_openai_api_key"
 ```
 
+Start FlareSolverr (any reachable instance works; this one is exposed on port 8191):
+```bash
+docker run -d --name flaresolverr -p 8191:8191 --restart unless-stopped ghcr.io/flaresolverr/flaresolverr:latest
+```
+
 Run the bot:
 ```bash
 cd src/
 python3 bot.py
+```
+
+Or run everything (bot + FlareSolverr) together:
+```bash
+docker compose up --build -d
 ```
 
 ## Usage
@@ -78,8 +88,6 @@ Saves this channel as an image channel. In every image channel, the bot will try
 Chooses a GPT version to use on the server. Running this command without the version attribute will return the currently chosen version.
 
 ## Limitations
-1. Unfortunately, Playwright cannot be used headless because RoyaleAPI blocks headless browsers.
+1. The search is not guaranteed to work if the player has a very common name and no clan or their clan has a common name too.
 
-2. The search is not guaranteed to work if the player has a very common name and no clan or their clan has a common name too.
-
-3. Even when the search works, there is a chance your opponent is not playing the same deck as last game.
+2. Even when the search works, there is a chance your opponent is not playing the same deck as last game.

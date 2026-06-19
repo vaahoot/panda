@@ -6,6 +6,20 @@ services:
     env_file:
       - .env
 
+    environment:
+      - FLARESOLVERR_URL=http://flaresolverr:8191/v1
+
     volumes:
       - ./bot.log:/app/bot.log
       - ./bot.db:/app/bot.db
+
+    depends_on:
+      - flaresolverr
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+    ports:
+      - "8191:8191"
