@@ -35,6 +35,8 @@ class CRBot(commands.Bot):
         await print_info(f"Database connected: {self.db.connection}")
 
     async def on_ready(self):
+        assert self.user is not None
+        await print_info(f"Logged in as: {self.user.name}:{self.user.id}")
         await self.change_presence(activity=discord.Activity(type=discord.ActivityType.competing, name="Guessing Clash Royale decks"))
         for guild in self.guilds:
             await self.db.add_guild(guild)
@@ -65,13 +67,10 @@ class CRBot(commands.Bot):
         await self.db.remove_guild(guild)
 
     async def close(self):
-        if self.context:
-            await self.context.close()
-            await print_info("Closed browser")
         if self.playwright:
             await self.playwright.stop()
             await print_info("Closed playwright")
-        if self.db:
+        if self.db.connection:
             await self.db.connection.close()
 
         await super().close()
