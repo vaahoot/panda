@@ -1,4 +1,5 @@
 import aiosqlite
+from aiosqlite import Connection
 import aiofiles
 from pathlib import Path
 
@@ -7,6 +8,7 @@ class Database:
     def __init__(self, path: Path, schema: Path):
         self.path = path
         self.schema = schema
+        self.connection: Connection | None = None
 
     async def connect(self):
         self.connection = await aiosqlite.connect(self.path)
@@ -17,6 +19,7 @@ class Database:
         await self.connection.commit()
 
     async def add_guild(self, guild):
+        assert self.connection is not None
         await self.connection.execute(
             "INSERT OR IGNORE INTO guild(guild_id) VALUES(?)",
             (guild.id,)
@@ -24,6 +27,7 @@ class Database:
         await self.connection.commit()
 
     async def remove_guild(self, guild):
+        assert self.connection is not None
         await self.connection.execute(
             "DELETE FROM guild WHERE guild_id = ?",
             (guild.id,)
@@ -31,6 +35,7 @@ class Database:
         await self.connection.commit()
 
     async def add_image_channel(self, guild, channel):
+        assert self.connection is not None
         cursor = await self.connection.execute(
             "INSERT OR IGNORE INTO guild_image_channel(guild_id, channel_id) VALUES(?, ?)",
             (guild.id, channel.id)
@@ -39,6 +44,7 @@ class Database:
         return cursor.rowcount > 0
 
     async def remove_image_channel(self, guild, channel):
+        assert self.connection is not None
         cursor = await self.connection.execute(
             "DELETE FROM guild_image_channel \
             WHERE guild_id = ? AND channel_id = ?",
@@ -48,6 +54,7 @@ class Database:
         return cursor.rowcount > 0
 
     async def is_image_channel(self, channel, guild):
+        assert self.connection is not None
         cursor = await self.connection.execute(
             "SELECT 1 \
             FROM guild_image_channel \
