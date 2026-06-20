@@ -6,6 +6,8 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from helper import print_warning
+
 
 def load_template(template_path: str | Path) -> tuple[np.ndarray, np.ndarray]:
     template = cv2.imread(template_path, cv2.IMREAD_COLOR)
@@ -66,7 +68,7 @@ async def process_image(image_url: str, template_gray: np.ndarray, mask: np.ndar
     match = find_shield(top_half, template_gray, mask)
 
     if match is None:
-        print("Shield not found, returning full image")
+        await print_warning("Shield not found, returning full image")
         return image_bytes
 
     x, y, _, h = match

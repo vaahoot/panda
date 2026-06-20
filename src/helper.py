@@ -29,6 +29,8 @@ async def log(msg, color, type):
 async def print_info(msg):
     await log(msg, Fore.GREEN, "INFO")
 
+async def print_warning(msg):
+    await log(msg, Fore.LIGHTYELLOW_EX, "WARNING")
 
 async def print_error(msg):
     await log(msg, Fore.RED, "ERROR")
