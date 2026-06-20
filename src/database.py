@@ -63,3 +63,23 @@ class Database:
         )
         row = await cursor.fetchone()
         return row is not None
+
+    async def set_prefix(self, guild, prefix):
+        assert self.connection is not None
+        await self.connection.execute(
+            "UPDATE guild \
+            SET prefix = ? \
+            WHERE guild_id = ?",
+            (prefix, guild.id)
+        )
+        await self.connection.commit()
+
+    async def get_prefix(self, guild):
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "SELECT prefix \
+            FROM guild \
+            WHERE guild_id = ?",
+            (guild.id,)
+        )
+        return await cursor.fetchone()
