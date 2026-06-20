@@ -1,4 +1,5 @@
 import io
+import os
 import time
 
 import discord
@@ -6,7 +7,7 @@ from discord.ext.commands import Bot
 from discord.ext.commands.errors import NoPrivateMessage
 
 import search
-from config import DATABASE, SCHEMA, SHIELD_TEMPLATE
+from config import COGS, DATABASE, DEFAULT_PREFIX, SCHEMA, SHIELD_TEMPLATE
 from crop import load_template, process_image
 from database import Database
 from deck import build_deck_image
@@ -15,13 +16,33 @@ from helper import print_error, print_info
 
 
 class CRBot(Bot):
-    def __init__(self, command_prefix, intents, gpt_client):
-        super().__init__(command_prefix, intents=intents)
+    def __init__(self, intents, gpt_client, help_command):
+        super().__init__(
+            command_prefix=self.__get_prefix,
+            intents=intents,
+            help_command=help_command
+        )
+        self.prefix_cache = {}
+
         self.db = Database(DATABASE, SCHEMA)
         self.gpt_client = gpt_client
         self.template_gray, self.mask = load_template(SHIELD_TEMPLATE)
 
+    async def __get_prefix(self, bot, message):
+        if not message.guild:
+            return DEFAULT_PREFIX
+
+        if message.guild.id not in self.prefix_cache:
+            row = await self.db.get_prefix(message.guild)
+            self.prefix_cache[message.guild.id] = row[0] if row else "!"
+
+        return self.prefix_cache[message.guild.id]
+
     async def setup_hook(self):
+        for file in os.listdir(COGS):
+            if file.endswith(".py") and file != "__init__.py":
+                await self.load_extension(f"cogs.{file[:-3]}")
+
         await search.create_flaresolverr_session()
 
         await self.db.connect()
@@ -30,7 +51,9 @@ class CRBot(Bot):
     async def on_ready(self):
         assert self.user is not None
         await print_info(f"Logged in as: {self.user.name}:{self.user.id}")
-        await self.change_presence(activity=discord.Activity(type=discord.ActivityType.competing, name="Guessing Clash Royale decks"))
+
+        await self.change_presence(activity=discord.CustomActivity("Let's play some Clash Royale | !help"))
+
         for guild in self.guilds:
             await self.db.add_guild(guild)
 
@@ -49,7 +72,7 @@ class CRBot(Bot):
 
         if attachments:
             if guild is None or await self.db.is_image_channel(channel, guild):
-                await self.search_by_image(message)
+                await self.search_by_screenshot(message)
 
     async def on_guild_join(self, guild):
         await print_info(f"Joined guild {guild.name}, id: {guild.id}")
@@ -82,7 +105,7 @@ class CRBot(Bot):
             deck = await search.find_deck(name, clan)
 
             if not deck:
-                await message.reply("No deck found")
+                await message.reply("No deck found.")
                 return
 
             await print_info(f"Found deck for {name}: {[card['name'] for card in deck]}")
@@ -96,7 +119,7 @@ class CRBot(Bot):
         time_taken = time.time() - start
         await print_info(f"Search by info took {time_taken:.2f}s")
 
-    async def search_by_image(self, message):
+    async def search_by_screenshot(self, message):
         start = time.time()
 
         attachments = message.attachments
@@ -110,7 +133,7 @@ class CRBot(Bot):
             player_info = await extract_player_info(self.gpt_client, image_bytes)
 
             if not player_info:
-                await message.reply("Internal Error")
+                await message.reply("Internal Error.")
                 return
 
             name = player_info.get("name")
@@ -118,7 +141,7 @@ class CRBot(Bot):
 
             if not name:
                 await print_error(f"Invalid image received: {url}")
-                await message.reply("Invalid image")
+                await message.reply("Invalid screenshot.")
                 return
 
             await self.search_by_info(name, clan, message)

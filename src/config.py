@@ -1,6 +1,7 @@
 import os
-from dotenv import load_dotenv
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -13,6 +14,7 @@ CLASH_API_KEY = os.getenv("CR_KEY")
 CLASH_API_HEADERS = {"Authorization": f"Bearer {CLASH_API_KEY}"}
 
 DISCORD_API_KEY = os.getenv("DISCORD_KEY")
+DEFAULT_PREFIX = "!"
 
 FLARESOLVERR_URL = os.getenv("FLARESOLVERR_URL", "http://localhost:8191/v1")
 FLARESOLVERR_TIMEOUT_MS = 60000
@@ -30,15 +32,23 @@ Rules:
 - Preserve exact spelling and capitalisation
 - If you are uncertain about specific characters, output the largest substring you are certain about"""
 
-ROOT = Path(__file__).parent.parent
-ASSETS = ROOT / "assets/"
-IMAGES = ASSETS / "images/"
-FONTS = ASSETS / "fonts/"
-DB = ROOT / "db"
+FILE = Path(__file__)
+SRC = FILE.parent
+ROOT = FILE.parent.parent
 
+COGS = SRC / "cogs/"
+
+ASSETS = ROOT / "assets/"
+DB = ROOT / "db/"
 LOGS = ROOT / "bot.log"
 DATABASE = ROOT / "bot.db"
+
+IMAGES = ASSETS / "images/"
+FONTS = ASSETS / "fonts/"
+
 SHIELD_TEMPLATE = IMAGES / "shield.png"
 DROPLET = IMAGES / "elixir-droplet.png"
+
 FONT = FONTS / "lilita.ttf"
+
 SCHEMA = DB / "schema.sql"
