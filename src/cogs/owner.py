@@ -34,7 +34,7 @@ class Owner(commands.Cog, name="🐼 Owner"):
     @commands.is_owner()
     async def reload(self, ctx, cog: str):
         await self.bot.reload_extension(f"cogs.{cog}")
-        await ctx.reply(f"Reloaded {cog} — commands: {[c.name for c in self.bot.commands]}")
+        await ctx.reply(f"Reloaded {cog}")
 
     @commands.command()
     @commands.is_owner()
@@ -69,6 +69,13 @@ class Owner(commands.Cog, name="🐼 Owner"):
         embed.add_field(name="Ping", value=f"{self.bot.latency * 1000:.0f}ms")
         await ctx.send(embed=embed)
 
+    @commands.command()
+    @commands.is_owner()
+    async def list_users(self, ctx):
+        res = ""
+        for user in self.bot.users:
+            res += f"{user.name}\n"
+        await ctx.send(res)
 
 async def setup(bot):
     await bot.add_cog(Owner(bot))

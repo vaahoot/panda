@@ -18,10 +18,10 @@ COG_COUNT = len(
     [file for file in os.listdir(COGS) if file.endswith(".py")]
 )
 COGS_LIST = [
-    "search_commands",
-    "settings_commands",
-    "support_commands",
-    "owner_commands"
+    "search",
+    "settings",
+    "support",
+    "owner"
 ]
 assert COG_COUNT == len(COGS_LIST), "New Cog was added but not added to the load list"
 

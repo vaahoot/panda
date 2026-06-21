@@ -9,6 +9,10 @@ class Settings(commands.Cog, name="⚙️ Settings"):
     @commands.command(aliases=["sc"], brief="<on/off> Mark current channel as a screenshot channel.")
     @commands.guild_only()
     async def screenshot_channel(self, ctx, state: str | None = None):
+        """Mark the current channel as a screenshot channel.
+        In a screenshot channel, the bot will attempt to search every image sent, no !screenshot needed.
+        Useful to save save time and not type !screenshot/!s every time.
+        """
         guild = ctx.guild
         channel = ctx.channel
 
