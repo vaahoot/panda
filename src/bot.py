@@ -2,7 +2,7 @@ import discord
 from openai import AsyncOpenAI
 
 from config import DISCORD_API_KEY
-from CRBot import CRBot
+from Panda import Panda
 from CustomHelp import CustomHelp
 
 if not DISCORD_API_KEY:
@@ -14,5 +14,5 @@ intents.message_content = True
 
 ai_client = AsyncOpenAI()
 
-bot = CRBot(intents=intents, gpt_client=ai_client, help_command=CustomHelp())
+bot = Panda(intents=intents, gpt_client=ai_client, help_command=CustomHelp())
 bot.run(DISCORD_API_KEY)

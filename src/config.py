@@ -1,9 +1,13 @@
 import os
 from pathlib import Path
 
+import discord
 from dotenv import load_dotenv
 
 load_dotenv()
+
+MAIN_COLOR = discord.Color.from_rgb(210, 140, 125)
+ERROR_COLOR = discord.Color.from_rgb(250, 100, 120)
 
 ROYALE_API_PLAYER_SEARCH = "https://royaleapi.com/player/search/results?q={0}"
 ROYALE_API_CLAN_SEARCH = "https://royaleapi.com/clans/search?name={0}"

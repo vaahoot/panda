@@ -1,5 +1,11 @@
+from typing import cast
+
 import discord
 from discord.ext import commands
+
+from cogs.support_commands import SupportView
+from config import DEFAULT_PREFIX, ERROR_COLOR, MAIN_COLOR
+from Panda import Panda
 
 
 class CustomHelp(commands.HelpCommand):
@@ -7,7 +13,7 @@ class CustomHelp(commands.HelpCommand):
         """Called when user runs !help"""
         embed = discord.Embed(
             title="Command list",
-            color=discord.Color.dark_magenta(),
+            color=MAIN_COLOR,
         )
 
         for cog, cmds in mapping.items():
@@ -23,14 +29,22 @@ class CustomHelp(commands.HelpCommand):
                 inline=False,
             )
 
-        await self.get_destination().send(embed=embed)
+        bot = cast("Panda", self.context.bot)
+        guild_id = self.context.guild.id if self.context.guild else None
+        prefix = bot.prefix_cache.get(guild_id, DEFAULT_PREFIX) if guild_id else DEFAULT_PREFIX
+        embed.add_field(
+            name="",
+            value=f"For more info, run {prefix}help command name"
+        )
+
+        await self.get_destination().send(embed=embed, view=SupportView())
 
     async def send_cog_help(self, cog):
         """Called when user runs !help <cog>"""
         embed = discord.Embed(
             title=f"{cog.qualified_name} Commands",
             description=cog.description or "No description",
-            color=discord.Color.dark_magenta(),
+            color=MAIN_COLOR,
         )
 
         filtered = await self.filter_commands(cog.get_commands(), sort=True)
@@ -46,19 +60,15 @@ class CustomHelp(commands.HelpCommand):
         embed = discord.Embed(
             title=f"`{command.name}`",
             description=command.help or "No description",
-            color=discord.Color.dark_magenta(),
+            color=MAIN_COLOR,
         )
         if command.aliases:
             embed.add_field(
                 name="Aliases", value=", ".join(f"`{a}`" for a in command.aliases)
             )
-        if command.signature:
-            embed.add_field(name="Usage", value=f"`{command.name} {command.signature}`")
 
         await self.get_destination().send(embed=embed)
 
     async def send_error_message(self, error):
-        embed = discord.Embed(
-            description=error, color=discord.Color.red()
-        )
+        embed = discord.Embed(description=error, color=ERROR_COLOR)
         await self.get_destination().send(embed=embed)

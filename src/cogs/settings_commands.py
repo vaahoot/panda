@@ -1,12 +1,12 @@
 from discord.ext import commands
 
 
-class Settings(commands.Cog, name="Settings ⚙️"):
-    """Commands to change preferences for this bot."""
+class Settings(commands.Cog, name="⚙️ Settings"):
+    """Change preferences for this bot."""
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(aliases=["sc"], brief="Mark current channel as a screenshot channel.")
+    @commands.command(aliases=["sc"], brief="<on/off> Mark current channel as a screenshot channel.")
     @commands.guild_only()
     async def screenshot_channel(self, ctx, state: str | None = None):
         guild = ctx.guild
@@ -36,14 +36,14 @@ class Settings(commands.Cog, name="Settings ⚙️"):
         else:
             await ctx.reply(f"Invalid state {state}.")
 
-    @commands.command(brief="Change the current comman prefix.")
+    @commands.command(brief="Change the current command prefix.")
     @commands.guild_only()
     async def prefix(self, ctx, prefix=None):
         guild = ctx.guild
 
         if prefix is None:
             current_prefix = await self.bot.db.get_prefix(guild)
-            ctx.send(f"The current prefix is `{current_prefix}`.")
+            await ctx.send(f"The current prefix is `{current_prefix}`.")
             return
 
         await self.bot.db.set_prefix(guild, prefix)

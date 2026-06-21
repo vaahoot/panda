@@ -12,6 +12,7 @@ services:
     volumes:
       - ./bot.log:/app/bot.log
       - ./bot.db:/app/bot.db
+      - ./src:/app/src/
 
     depends_on:
       - flaresolverr

@@ -4,7 +4,7 @@ import time
 
 import discord
 from discord.ext.commands import Bot
-from discord.ext.commands.errors import NoPrivateMessage
+from discord.ext.commands.errors import NoPrivateMessage, CommandOnCooldown
 
 import search
 from config import COGS, DATABASE, DEFAULT_PREFIX, SCHEMA, SHIELD_TEMPLATE
@@ -14,8 +14,19 @@ from deck import build_deck_image
 from gpt import extract_player_info
 from helper import print_error, print_info
 
+COG_COUNT = len(
+    [file for file in os.listdir(COGS) if file.endswith(".py")]
+)
+COGS_LIST = [
+    "search_commands",
+    "settings_commands",
+    "support_commands",
+    "owner_commands"
+]
+assert COG_COUNT == len(COGS_LIST), "New Cog was added but not added to the load list"
 
-class CRBot(Bot):
+
+class Panda(Bot):
     def __init__(self, intents, gpt_client, help_command):
         super().__init__(
             command_prefix=self.__get_prefix,
@@ -29,19 +40,20 @@ class CRBot(Bot):
         self.template_gray, self.mask = load_template(SHIELD_TEMPLATE)
 
     async def __get_prefix(self, bot, message):
+        assert bot is not None
         if not message.guild:
             return DEFAULT_PREFIX
 
         if message.guild.id not in self.prefix_cache:
-            row = await self.db.get_prefix(message.guild)
-            self.prefix_cache[message.guild.id] = row[0] if row else "!"
+            prefix = await self.db.get_prefix(message.guild)
+            self.prefix_cache[message.guild.id] = prefix
 
-        return self.prefix_cache[message.guild.id]
+        assert self.user is not None
+        return [self.prefix_cache[message.guild.id], f"<@{self.user.id}> ", f"<@!{self.user.id}> "]
 
     async def setup_hook(self):
-        for file in os.listdir(COGS):
-            if file.endswith(".py") and file != "__init__.py":
-                await self.load_extension(f"cogs.{file[:-3]}")
+        for cog in COGS_LIST:
+            await self.load_extension(f"cogs.{cog}")
 
         await search.create_flaresolverr_session()
 
@@ -52,7 +64,7 @@ class CRBot(Bot):
         assert self.user is not None
         await print_info(f"Logged in as: {self.user.name}:{self.user.id}")
 
-        await self.change_presence(activity=discord.CustomActivity("Let's play some Clash Royale | !help"))
+        await self.change_presence(activity=discord.CustomActivity("Let's play some Clash Royale!"))
 
         for guild in self.guilds:
             await self.db.add_guild(guild)
@@ -92,6 +104,8 @@ class CRBot(Bot):
     async def on_command_error(self, ctx, error):
         if isinstance(error, NoPrivateMessage):
             await ctx.send(error)
+        elif isinstance(error, CommandOnCooldown):
+            await ctx.reply(f"Slow down! Try again in {error.retry_after:.0f} seconds")
         else:
             raise error
 

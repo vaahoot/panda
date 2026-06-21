@@ -1,14 +1,15 @@
 from discord.ext import commands
-from CRBot import CRBot
+from Panda import Panda
 
 
-class Search(commands.Cog, name="Search 🔎"):
-    """Commands to search for decks."""
+class Search(commands.Cog, name="🔎 Search"):
+    """Search for decks."""
     def __init__(self, bot):
-        self.bot: CRBot = bot
+        self.bot: Panda = bot
 
+    @commands.cooldown(rate=5, per=60, type=commands.BucketType.user)
     @commands.command(aliases=["d"], brief="Find a deck by nickname and clan")
-    async def deck(self, ctx):
+    async def deck(self, ctx, *, query: str | None=None):
         """Searches an opponent's deck by name and clan.
 
         Both arguments can be partial matches if you can't enter some of the characters from either.
@@ -17,10 +18,11 @@ class Search(commands.Cog, name="Search 🔎"):
 
         Example: `!deck Ijihu, Lifetime`
         """
-        message = ctx.message.content
-        message_without_command = message[2:]
+        if query is None:
+            await ctx.reply("You need to provide a name and clan(optional)")
+            return
 
-        args = message_without_command.split(",")
+        args = query.split(",")
 
         if len(args) == 2:
             name = args[0].strip()
@@ -34,6 +36,7 @@ class Search(commands.Cog, name="Search 🔎"):
 
         await self.bot.search_by_info(name, clan, ctx.message)
 
+    @commands.cooldown(rate=1, per=120, type=commands.BucketType.user)
     @commands.command(aliases=["s", "ss"], brief="Find a deck by screenshot")
     async def screenshot(self, ctx):
         """Searches an opponent's deck by a screenshot of the match.

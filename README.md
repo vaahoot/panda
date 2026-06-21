@@ -33,7 +33,7 @@ Additionally I'm using Pillow to create the image of the deck that the bot then 
 Clone the repo:
 ```bash
 git clone git@github.com:vaahoot/cr-deck-bot.git
-cd cr-deck-bot
+cd panda
 ```
 
 All the dependencies can be installed with:

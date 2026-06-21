@@ -3,6 +3,8 @@ from aiosqlite import Connection
 import aiofiles
 from pathlib import Path
 
+from config import DEFAULT_PREFIX
+
 
 class Database:
     def __init__(self, path: Path, schema: Path):
@@ -82,4 +84,6 @@ class Database:
             WHERE guild_id = ?",
             (guild.id,)
         )
-        return await cursor.fetchone()
+
+        result = await cursor.fetchone()
+        return result[0] if result else DEFAULT_PREFIX
