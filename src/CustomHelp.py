@@ -3,7 +3,7 @@ from typing import cast
 import discord
 from discord.ext import commands
 
-from cogs.support_commands import SupportView
+from cogs.support import SupportView
 from config import DEFAULT_PREFIX, ERROR_COLOR, MAIN_COLOR
 from Panda import Panda
 

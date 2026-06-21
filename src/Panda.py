@@ -3,11 +3,11 @@ import os
 import time
 
 import discord
-from discord.ext.commands import Bot
-from discord.ext.commands.errors import NoPrivateMessage, CommandOnCooldown
+from discord.ext.commands import Bot, Context
+from discord.ext.commands import errors
 
 import search
-from config import COGS, DATABASE, DEFAULT_PREFIX, SCHEMA, SHIELD_TEMPLATE
+from config import COGS, DATABASE, DEFAULT_PREFIX, ERROR_COLOR, SCHEMA, SHIELD_TEMPLATE
 from crop import load_template, process_image
 from database import Database
 from deck import build_deck_image
@@ -101,11 +101,22 @@ class Panda(Bot):
 
         await super().close()
 
-    async def on_command_error(self, ctx, error):
-        if isinstance(error, NoPrivateMessage):
-            await ctx.send(error)
-        elif isinstance(error, CommandOnCooldown):
+    async def on_command_error(self, ctx: Context, error: Exception):
+        if isinstance(error, errors.CommandInvokeError):
+            error = error.original
+
+        error_message = str(error).replace("'", "`")
+
+        if isinstance(error, errors.NoPrivateMessage):
+            await ctx.reply(error_message)
+        elif isinstance(error, errors.CommandOnCooldown):
             await ctx.reply(f"Slow down! Try again in {error.retry_after:.0f} seconds")
+        elif isinstance(error, errors.ExtensionAlreadyLoaded):
+            await ctx.reply(error_message)
+        elif isinstance(error, errors.ExtensionNotLoaded):
+            await ctx.reply(error_message)
+        elif isinstance(error, errors.ExtensionNotFound):
+            await ctx.reply(error_message)
         else:
             raise error
 
@@ -119,7 +130,10 @@ class Panda(Bot):
             deck = await search.find_deck(name, clan)
 
             if not deck:
-                await message.reply("No deck found.")
+                embed = discord.Embed(title="No deck Found", color=ERROR_COLOR)
+                embed.add_field(name="Name", value=name, inline=False)
+                embed.add_field(name="Clan", value=clan, inline=False)
+                await message.reply(embed=embed)
                 return
 
             await print_info(f"Found deck for {name}: {[card['name'] for card in deck]}")
@@ -128,7 +142,10 @@ class Panda(Bot):
             deck_image.save(buffer, format="PNG")
             buffer.seek(0)
 
-        await message.reply(file=discord.File(buffer, filename="deck.png"))
+        await message.reply(
+            f"Name: {name}\nClan: {clan}",
+            file=discord.File(buffer, filename="deck.png")
+        )
 
         time_taken = time.time() - start
         await print_info(f"Search by info took {time_taken:.2f}s")
@@ -138,6 +155,14 @@ class Panda(Bot):
 
         attachments = message.attachments
         channel = message.channel
+
+        if len(attachments) > 1:
+            await message.reply("Please only send 1 image")
+            return
+
+        if not attachments[0].content_type.startswith("image/"):
+            await message.reply("Attachment must be an image")
+            return
 
         async with channel.typing():
             url = attachments[0].url

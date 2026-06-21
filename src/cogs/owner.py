@@ -13,11 +13,16 @@ class Owner(commands.Cog, name="🐼 Owner"):
     @commands.command()
     @commands.is_owner()
     async def list_guilds(self, ctx):
-        res = ""
-        for guild in self.bot.guilds:
-            res += f"{guild.id}: {guild.name}\n"
+        embed = discord.Embed(title=f"Guilds: {len(self.bot.guilds)}", color=MAIN_COLOR)
 
-        await ctx.send(res)
+        for guild in self.bot.guilds:
+            embed.add_field(
+                name="",
+                value=f"{guild.id}: {guild.name}\n",
+                inline=False
+            )
+
+        await ctx.send(embed=embed)
 
     @commands.command()
     @commands.is_owner()
