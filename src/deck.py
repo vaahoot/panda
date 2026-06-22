@@ -32,8 +32,8 @@ def get_last_deck(data: list[dict] | None) -> list[dict[str, str]] | None:
     for card in cards:
         card_info = {}
 
-        card_info["name"] = card["name"]
-        card_info["cost"] = card["elixirCost"]
+        card_info["name"] = card.get("name", "Unknown")
+        card_info["cost"] = card.get("elixirCost", 1.5)
 
         card_icons = card["iconUrls"]
         if card.get("evolutionLevel") == 1:
