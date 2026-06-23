@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from helper import print_warning
+from helper import print_info, print_warning
 
 
 def load_template(template_path: str | Path) -> tuple[np.ndarray, np.ndarray]:
@@ -17,7 +17,7 @@ def load_template(template_path: str | Path) -> tuple[np.ndarray, np.ndarray]:
     return template_gray, mask
 
 
-def find_shield(img_gray: np.ndarray, template_gray: np.ndarray, mask: np.ndarray) -> tuple[int, int, int, int] | None:
+async def find_shield(img_gray: np.ndarray, template_gray: np.ndarray, mask: np.ndarray) -> tuple[int, int, int, int] | None:
     img_h, img_w = img_gray.shape
     t_h, t_w = template_gray.shape
 
@@ -42,7 +42,7 @@ def find_shield(img_gray: np.ndarray, template_gray: np.ndarray, mask: np.ndarra
             best_x, best_y = int(location[0]), int(location[1])
             best_scale = scale
 
-    print(f"Best confidence: {best_confidence:.2f} at scale {best_scale:.2f}")
+    await print_info(f"Best confidence: {best_confidence:.2f} at scale {best_scale:.2f}")
 
     if best_confidence < 0.50:
         return None
@@ -65,7 +65,7 @@ async def process_image(image_url: str, template_gray: np.ndarray, mask: np.ndar
     img_gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
     top_half = img_gray[:height // 2, :]
 
-    match = find_shield(top_half, template_gray, mask)
+    match = await find_shield(top_half, template_gray, mask)
 
     if match is None:
         await print_warning("Shield not found, returning full image")

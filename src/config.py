@@ -23,7 +23,7 @@ DEFAULT_PREFIX = "!"
 FLARESOLVERR_URL = os.getenv("FLARESOLVERR_URL", "http://localhost:8191/v1")
 FLARESOLVERR_TIMEOUT_MS = 60000
 
-GPT_DEFAULT_VERSION = "gpt-4o"
+GPT_DEFAULT_VERSION = "gpt-4o-mini"
 
 PROMPT = """You are analyzing a cropped section of a Clash Royale game screen showing a single player's information.
 Extract the player name and clan name from the image.
