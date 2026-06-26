@@ -7,7 +7,9 @@ class Search(commands.Cog, name="🔎 Search"):
     def __init__(self, bot):
         self.bot: Panda = bot
 
-    @commands.cooldown(rate=5, per=60, type=commands.BucketType.user)
+    # TODO: Implement new syntax where !d name     means any clan
+    #                                  !d name,    means no clan
+    @commands.cooldown(rate=3, per=60, type=commands.BucketType.user)
     @commands.command(aliases=["d"], brief="Find a deck by nickname and clan")
     async def deck(self, ctx, *, query: str | None=None):
         """Searches an opponent's deck by name and clan.
@@ -36,7 +38,7 @@ class Search(commands.Cog, name="🔎 Search"):
 
         await self.bot.search_by_info(name, clan, ctx.message)
 
-    @commands.cooldown(rate=1, per=120, type=commands.BucketType.user)
+    @commands.cooldown(rate=1, per=180, type=commands.BucketType.user)
     @commands.command(aliases=["s", "ss"], brief="Find a deck by screenshot")
     async def screenshot(self, ctx):
         """Searches an opponent's deck by a screenshot of the match.
