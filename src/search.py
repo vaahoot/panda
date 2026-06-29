@@ -29,7 +29,7 @@ async def create_flaresolverr_session() -> None:
             FLARESOLVERR_URL,
             json={
                 "cmd": "request.get",
-                "url": "https://royaleapi.com/",
+                "url": ROYALE_API_PLAYER_SEARCH,
                 "session": FLARESOLVERR_SESSION,
                 "maxTimeout": FLARESOLVERR_TIMEOUT_MS,
             },
