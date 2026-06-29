@@ -17,8 +17,17 @@ async def extract_player_info(client: AsyncOpenAI, image_bytes: bytes, retries: 
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": PROMPT},
-                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                            {
+                                "type": "text",
+                                "text": PROMPT,
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{b64}",
+                                    "detail": "low",
+                                },
+                            },
                         ],
                     }
                 ],
