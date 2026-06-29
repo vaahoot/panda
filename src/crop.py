@@ -60,7 +60,7 @@ async def find_shield(
     img_gray: np.ndarray,
     template_gray: np.ndarray,
     mask: np.ndarray,
-    confidence_threshold: float = 0.65, 
+    confidence_threshold: float = 0.8,
 ) -> ShieldMatch | None:
     img_h, img_w = img_gray.shape
     t_h, t_w = template_gray.shape
@@ -175,27 +175,31 @@ async def process_image(
     img_cv = decode_image(image_bytes)
     height, width = img_cv.shape[:2]
 
-    search_region = img_cv[: height // 2, :]
+    search_y_start = int(height * 0.1)
+    search_y_end = int(height * 0.3)
+    search_x_end = int(width * 0.25)
+    manual_y_start = int(height * 0.05)
+    manual_x_end = int(width * 0.5)
+
+    search_region = img_cv[search_y_start:search_y_end, :search_x_end]
     search_gray = cv2.cvtColor(search_region, cv2.COLOR_BGR2GRAY)
 
     match = await find_shield(search_gray, template_gray, mask)
 
     if match is None:
-        await print_warning("Shield not found, returning top half of the image")
-        fallback_rgb = cv2.cvtColor(search_region, cv2.COLOR_BGR2RGB)
-        cv2.imwrite("cropped.png", search_region)
+        await print_warning("Shield not found, cropping manually")
+
+        manual_crop = img_cv[manual_y_start:search_y_end, :manual_x_end]
+        fallback_rgb = cv2.cvtColor(manual_crop, cv2.COLOR_BGR2RGB)
         return to_png_bytes(fallback_rgb)
 
-    crop_x1 = max(0, match.x - padding)
-    crop_y1 = max(0, match.y - padding)
-    crop_x2 = min(width, match.x + match.w + int(width * 0.5))
-    crop_y2 = min(height // 2, match.y + match.h + padding)
+    global_match_y = match.y + search_y_start
+
+    crop_x1 = max(0, match.w + match.x - 5)
+    crop_y1 = max(0, global_match_y - padding)
+    crop_x2 = manual_x_end
+    crop_y2 = min(search_y_end, global_match_y + match.h + padding)
 
     cropped_bgr = img_cv[crop_y1:crop_y2, crop_x1:crop_x2]
-
-    cv2.imwrite("cropped.png", cropped_bgr)
-    await print_info("Saved debug output to cropped.png")
-
     cropped_rgb = cv2.cvtColor(cropped_bgr, cv2.COLOR_BGR2RGB)
     return to_png_bytes(cropped_rgb)
-
