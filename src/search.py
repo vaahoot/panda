@@ -123,6 +123,8 @@ def parse_clans(html: str) -> list[str]:
 
 
 def find_player_tag(players: list[dict], clan: str | None) -> str | None:
+    if len(players) == 1:
+        return players[0]["tag"]
     if not clan:
         for player in players:
             if not player["clan"]:
