@@ -47,7 +47,7 @@ class Search(commands.Cog, name="🔎 Search"):
         Ideally someone who spectates will screenshot and send it to the bot.
 
         Example: `!screenshot <attach a screenshot>`"""
-        attachments = ctx.attachments
+        attachments = ctx.message.attachments
         if not attachments:
             await ctx.reply("This command requires an image attached")
             return
