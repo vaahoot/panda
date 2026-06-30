@@ -11,7 +11,7 @@ from config import COGS, DATABASE, DEFAULT_PREFIX, ERROR_COLOR, SCHEMA, SHIELD_T
 from crop import load_template, process_image
 from database import Database
 from deck import build_deck_image
-from gpt import extract_player_info
+from claude import extract_player_info
 from helper import print_error, print_info
 
 COG_COUNT = len(
