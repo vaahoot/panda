@@ -5,6 +5,7 @@ import time
 import discord
 from discord.ext.commands import Bot, Context
 from discord.ext.commands import errors
+from aiohttp.client_exceptions import ClientResponseError
 
 import search
 from config import COGS, DATABASE, DEFAULT_PREFIX, ERROR_COLOR, SCHEMA, SHIELD_TEMPLATE
@@ -116,6 +117,8 @@ class Panda(Bot):
         elif isinstance(error, errors.ExtensionNotLoaded):
             await ctx.reply(error_message)
         elif isinstance(error, errors.ExtensionNotFound):
+            await ctx.reply(error_message)
+        elif isinstance(error, ClientResponseError):
             await ctx.reply(error_message)
         else:
             raise error
