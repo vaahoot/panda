@@ -26,8 +26,10 @@ The bot expects three API keys in your environment variables:
 ```DISCORD_KEY``` - Discord bot token.
 
 ```OPENAI_API_KEY``` - OpenAI API token.
+OR
+```ANTHROPIC_API_KEY``` - Anthropic API token.
 
-Additionally I'm using Pillow to create the image of the deck that the bot then sends to the chat.
+Additionally I'm using Pillow to create the image of the deck that the bot then sends to the user.
 
 ## Installation and Running the bot
 Clone the repo:
@@ -46,6 +48,7 @@ Set environment variables:
 export CR_KEY="your_cr_api_key"
 export DISCORD_KEY="your_discord_bot_token"
 export OPENAI_API_KEY="your_openai_api_key"
+export ANTHROPIC_API_KEY="your_anthropic_api_key"
 ```
 
 Start FlareSolverr (any reachable instance works; this one is exposed on port 8191):
@@ -64,29 +67,7 @@ Or run everything (bot + FlareSolverr) together:
 docker compose up --build -d
 ```
 
-## Usage
-When you create your bot and get a token, invite it to your server and set the token in your environment variables.
-
 ```
-!d <nickname>, <clan>
-```
-Clan is optional but if not given, only users with no clan will be searched. Exact names are recommended although incomplete name/clan can still work.
-
-```
-!i <attach image to the message>
-```
-The image should be a screenshot of the battle, an API call is made to chatGPT to identify the name and clan and then search for the deck. Useful when the nickname is in another language or contains a lot of emotes and will take long to write.
-
-```
-!image_channel <on/off>
-```
-Saves this channel as an image channel. In every image channel, the bot will try to search for a deck for every image sent, useful if you want to have a dedicated channel in which you can just send screenshots and get decks without the `!i` command to save time.
-
-```
-!gpt <version>
-```
-Chooses a GPT version to use on the server. Running this command without the version attribute will return the currently chosen version.
-
 ## Limitations
 1. The search is not guaranteed to work if the player has a very common name and no clan or their clan has a common name too.
 
