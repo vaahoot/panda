@@ -53,8 +53,8 @@ Run everything together:
 docker compose up --build -d
 ```
 
-```
 ## Limitations
+```
 1. The search is not guaranteed to work if the player has a very common name and no clan or their clan has a common name too.
 
 2. Even when the search works, there is a chance your opponent is not playing the same deck as last game.
