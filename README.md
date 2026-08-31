@@ -25,7 +25,7 @@ The bot expects three API keys in your environment variables:
 
 ```DISCORD_KEY``` - Discord bot token.
 
-```OPENAI_API_KEY``` - OpenAI API token.
+```ANTHROPIC_API_KEY``` - Anthropic API token.
 
 Additionally I'm using Pillow to create the image of the deck that the bot then sends to the user.
 
