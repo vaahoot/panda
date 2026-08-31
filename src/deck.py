@@ -1,12 +1,19 @@
 import io
 
 import aiohttp
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
 from config import DROPLET, FONT
 
 
-def get_last_deck(data: list[dict] | None) -> list[dict[str, str]] | None:
+async def fetch_image(url: str) -> Image.Image:
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            data = await response.read()
+            return Image.open(io.BytesIO(data))
+
+
+async def get_last_deck(data: list[dict] | None) -> list[dict[str, str]] | None:
     if not data:
         return None
 
@@ -36,23 +43,20 @@ def get_last_deck(data: list[dict] | None) -> list[dict[str, str]] | None:
         card_info["cost"] = card.get("elixirCost", 1.5)
 
         card_icons = card["iconUrls"]
-        if card.get("evolutionLevel") == 1:
-            card_info["imgLink"] = card_icons["evolutionMedium"]
-        elif card.get("evolutionLevel") == 2:
-            card_info["imgLink"] = card_icons["heroMedium"]
-        else:
-            card_info["imgLink"] = card_icons["medium"]
+        try:
+            if card.get("evolutionLevel") == 1:
+                card_info["img"] = await fetch_image(card_icons["evolutionMedium"])
+            elif card.get("evolutionLevel") == 2:
+                card_info["img"] = await fetch_image(card_icons["heroMedium"])
+            else:
+                card_info["img"] = await fetch_image(card_icons["medium"])
+
+        except UnidentifiedImageError:
+                card_info["img"] = await fetch_image(card_icons["medium"])
 
         deck.append(card_info)
 
     return deck
-
-
-async def fetch_image(url: str) -> Image.Image:
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            data = await response.read()
-            return Image.open(io.BytesIO(data))
 
 
 def get_average_elixir(cards: list[dict]) -> float:
@@ -63,7 +67,7 @@ def get_average_elixir(cards: list[dict]) -> float:
 
 
 async def build_deck_image(cards: list[dict]) -> Image.Image:
-    images = [await fetch_image(card["imgLink"]) for card in cards]
+    images = [card["img"] for card in cards]
     elixir_drop = Image.open(DROPLET)
     drop_width = elixir_drop.width
     drop_height = elixir_drop.height
