@@ -181,7 +181,7 @@ async def find_deck_by_name(name: str, clan: str | None) -> list[dict[str, str]]
 
     await print_info(f"Found player by name. Tag: {player_tag}")
     data = await get_battle_log(player_tag)
-    return get_last_deck(data)
+    return await get_last_deck(data)
 
 
 async def find_deck_by_clan(name: str, clan: str) -> list[dict[str, str]] | None:
@@ -194,7 +194,7 @@ async def find_deck_by_clan(name: str, clan: str) -> list[dict[str, str]] | None
 
     await print_info(f"Found player by clan. Tag: {member_tag}")
     data = await get_battle_log(member_tag)
-    return get_last_deck(data)
+    return await get_last_deck(data)
 
 
 async def find_deck(name: str, clan: str | None) -> list[dict[str, str]] | None:
