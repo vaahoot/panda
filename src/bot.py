@@ -13,7 +13,6 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 
-ai_client = AsyncOpenAI()
 ai_client = AsyncAnthropic()
 
 bot = Panda(intents=intents, gpt_client=ai_client, help_command=CustomHelp())
