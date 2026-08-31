@@ -26,15 +26,13 @@ The bot expects three API keys in your environment variables:
 ```DISCORD_KEY``` - Discord bot token.
 
 ```OPENAI_API_KEY``` - OpenAI API token.
-OR
-```ANTHROPIC_API_KEY``` - Anthropic API token.
 
 Additionally I'm using Pillow to create the image of the deck that the bot then sends to the user.
 
 ## Installation and Running the bot
 Clone the repo:
 ```bash
-git clone git@github.com:vaahoot/cr-deck-bot.git
+git clone git@github.com:vaahoot/panda.git
 cd panda
 ```
 
@@ -47,22 +45,10 @@ Set environment variables:
 ```bash
 export CR_KEY="your_cr_api_key"
 export DISCORD_KEY="your_discord_bot_token"
-export OPENAI_API_KEY="your_openai_api_key"
 export ANTHROPIC_API_KEY="your_anthropic_api_key"
 ```
 
-Start FlareSolverr (any reachable instance works; this one is exposed on port 8191):
-```bash
-docker run -d --name flaresolverr -p 8191:8191 --restart unless-stopped ghcr.io/flaresolverr/flaresolverr:latest
-```
-
-Run the bot:
-```bash
-cd src/
-python3 bot.py
-```
-
-Or run everything (bot + FlareSolverr) together:
+Run everything together:
 ```bash
 docker compose up --build -d
 ```
@@ -72,3 +58,4 @@ docker compose up --build -d
 1. The search is not guaranteed to work if the player has a very common name and no clan or their clan has a common name too.
 
 2. Even when the search works, there is a chance your opponent is not playing the same deck as last game.
+```

@@ -1,5 +1,4 @@
 import discord
-from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 
 from config import DISCORD_API_KEY
