@@ -1,63 +1,24 @@
+import unicodedata
+
 import aiohttp
 import bs4
-from config import (
-    CLASH_API_BATTLE_LOG,
-    CLASH_API_CLAN_MEMBERS,
-    CLASH_API_HEADERS,
-    FLARESOLVERR_TIMEOUT_MS,
-    FLARESOLVERR_URL,
-    ROYALE_API_CLAN_SEARCH,
-    ROYALE_API_PLAYER_SEARCH,
-)
-from deck import get_last_deck
-from helper import normalise, print_info
 
-FLARESOLVERR_SESSION = "crbot"
+import log
+from clash.deck import get_deck
+from config import search_settings
+
+from . import flaresolverr
 
 
-async def create_flaresolverr_session() -> None:
-    async with aiohttp.ClientSession() as http:
-        async with http.post(
-            FLARESOLVERR_URL,
-            json={"cmd": "sessions.create", "session": FLARESOLVERR_SESSION},
-        ) as response:
-            response.raise_for_status()
-    await print_info(f"Created FlareSolverr session: {FLARESOLVERR_SESSION}")
-
-    async with aiohttp.ClientSession() as http:
-        async with http.post(
-            FLARESOLVERR_URL,
-            json={
-                "cmd": "request.get",
-                "url": ROYALE_API_PLAYER_SEARCH,
-                "session": FLARESOLVERR_SESSION,
-                "maxTimeout": FLARESOLVERR_TIMEOUT_MS,
-            },
-        ) as response:
-            response.raise_for_status()
-    await print_info("Warmed up RoyaleAPI Cloudflare cookies")
-
-
-async def destroy_flaresolverr_session() -> None:
-    async with aiohttp.ClientSession() as http:
-        async with http.post(
-            FLARESOLVERR_URL,
-            json={"cmd": "sessions.destroy", "session": FLARESOLVERR_SESSION},
-        ) as response:
-            response.raise_for_status()
+def normalise(text: str) -> str:
+    return unicodedata.normalize("NFKC", text).lower().strip()
 
 
 async def search(link: str, selector: str) -> str:
-    payload = {
-        "cmd": "request.get",
-        "url": link,
-        "session": FLARESOLVERR_SESSION,
-        "maxTimeout": FLARESOLVERR_TIMEOUT_MS,
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(FLARESOLVERR_URL, json=payload) as response:
-            response.raise_for_status()
-            data = await response.json()
+    data = await flaresolverr.solve(link)
+
+    if data is None:
+        raise ValueError()
 
     solution = data.get("solution") or {}
     html = solution.get("response", "")
@@ -67,13 +28,13 @@ async def search(link: str, selector: str) -> str:
 
 
 async def search_player_by_name(name: str) -> str:
-    link = ROYALE_API_PLAYER_SEARCH.format(name)
+    link = search_settings.ROYALE_API_PLAYER_SEARCH.format(name)
     search_result_selector = ".player_search_results__container"
     return await search(link, search_result_selector)
 
 
 async def search_clans_by_name(clan: str) -> str:
-    link = ROYALE_API_CLAN_SEARCH.format(clan)
+    link = search_settings.ROYALE_API_CLAN_SEARCH.format(clan)
     search_result_selector = ".three.doubling.stackable.cards"
     return await search(link, search_result_selector)
 
@@ -139,17 +100,17 @@ def find_player_tag(players: list[dict], clan: str | None) -> str | None:
 
 
 async def get_battle_log(tag: str) -> list[dict]:
-    url = CLASH_API_BATTLE_LOG.format(tag.replace("#", "%23"))
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=CLASH_API_HEADERS) as response:
+    url = search_settings.CR_API_BATTLE_LOG.format(tag.replace("#", "%23"))
+    async with aiohttp.ClientSession() as session:  # noqa: SIM117
+        async with session.get(url, headers=search_settings.CR_API_HEADERS) as response:
             response.raise_for_status()
             return await response.json()
 
 
 async def get_clan_members(clan_tag: str) -> dict:
-    url = CLASH_API_CLAN_MEMBERS.format(clan_tag)
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=CLASH_API_HEADERS) as response:
+    url = search_settings.CR_API_CLAN_MEMBERS.format(clan_tag)
+    async with aiohttp.ClientSession() as session:  # noqa: SIM117
+        async with session.get(url, headers=search_settings.CR_API_HEADERS) as response:
             response.raise_for_status()
             return await response.json()
 
@@ -179,9 +140,9 @@ async def find_deck_by_name(name: str, clan: str | None) -> list[dict[str, str]]
     if not player_tag:
         return None
 
-    await print_info(f"Found player by name. Tag: {player_tag}")
+    await log.info(f"Found player by name. Tag: {player_tag}")
     data = await get_battle_log(player_tag)
-    return await get_last_deck(data)
+    return await get_deck.get_last_deck(data)
 
 
 async def find_deck_by_clan(name: str, clan: str) -> list[dict[str, str]] | None:
@@ -192,9 +153,9 @@ async def find_deck_by_clan(name: str, clan: str) -> list[dict[str, str]] | None
     if not member_tag:
         return None
 
-    await print_info(f"Found player by clan. Tag: {member_tag}")
+    await log.info(f"Found player by clan. Tag: {member_tag}")
     data = await get_battle_log(member_tag)
-    return await get_last_deck(data)
+    return await get_deck.get_last_deck(data)
 
 
 async def find_deck(name: str, clan: str | None) -> list[dict[str, str]] | None:
@@ -206,6 +167,6 @@ async def find_deck(name: str, clan: str | None) -> list[dict[str, str]] | None:
         deck = await find_deck_by_clan(name, clan)
 
     if not deck:
-        await print_info(f"Player {name} not found")
+        await log.info(f"Player {name} not found")
 
     return deck

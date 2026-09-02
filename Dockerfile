@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.13-slim
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
@@ -8,4 +8,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["python3", "src/bot.py"]
+CMD ["python3", "src/main.py"]

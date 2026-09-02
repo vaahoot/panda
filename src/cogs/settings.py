@@ -1,14 +1,22 @@
+import discord
 from discord.ext import commands
+
+import core
 
 
 class Settings(commands.Cog, name="⚙️ Settings"):
     """Change preferences for this bot."""
-    def __init__(self, bot):
-        self.bot = bot
 
-    @commands.command(aliases=["sc"], brief="<on/off> Mark current channel as a screenshot channel.")
+    def __init__(self, bot: core.Panda):
+        self.bot: core.Panda = bot
+
+    @commands.command(
+        aliases=["sc"], brief="<on/off> Mark current channel as a screenshot channel."
+    )
     @commands.guild_only()
-    async def screenshot_channel(self, ctx, state: str | None = None):
+    async def screenshot_channel(
+        self, ctx: commands.Context, state: str | None = None
+    ) -> None:
         """Mark the current channel as a screenshot channel.
         In a screenshot channel, the bot will attempt to search every image sent, no !screenshot needed.
         Useful to save save time and not type !screenshot/!s every time.
@@ -16,8 +24,13 @@ class Settings(commands.Cog, name="⚙️ Settings"):
         guild = ctx.guild
         channel = ctx.channel
 
+        if not isinstance(channel, discord.TextChannel):
+            return
+        if guild is None:
+            return
+
         if not state:
-            image_channel = await self.bot.db.is_image_channel(channel, guild)
+            image_channel = await self.bot.db.is_image_channel(guild, channel)
             if image_channel:
                 await ctx.send(f"Channel {channel.name} is a screenshot channel.")
             else:
@@ -30,20 +43,26 @@ class Settings(commands.Cog, name="⚙️ Settings"):
             if add:
                 await ctx.send(f"Channel {channel.name} is now a screenshot channel.")
             else:
-                await ctx.send(f"Channel {channel.name} was already a screenshot channel.")
+                await ctx.send(
+                    f"Channel {channel.name} was already a screenshot channel."
+                )
         elif state.lower() == "off":
             remove = await self.bot.db.remove_image_channel(guild, channel)
             if remove:
-                await ctx.send(f"Channel {channel.name} is no longer a screenshot channel.")
+                await ctx.send(
+                    f"Channel {channel.name} is no longer a screenshot channel."
+                )
             else:
                 await ctx.send(f"Channel {channel.name} wasn't a screenshot channel.")
         else:
-            await ctx.reply(f"Invalid state {state}.")
+            await ctx.reply(f"Invalid state: `{state}`.")
 
     @commands.command(brief="Change the current command prefix.")
     @commands.guild_only()
-    async def prefix(self, ctx, prefix=None):
+    async def prefix(self, ctx: commands.Context, prefix: str | None = None) -> None:
         guild = ctx.guild
+        if guild is None:
+            return
 
         if prefix is None:
             current_prefix = await self.bot.db.get_prefix(guild)

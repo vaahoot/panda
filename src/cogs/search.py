@@ -1,17 +1,19 @@
 from discord.ext import commands
-from Panda import Panda
+
+import core
 
 
 class Search(commands.Cog, name="🔎 Search"):
     """Search for decks."""
-    def __init__(self, bot):
-        self.bot: Panda = bot
+
+    def __init__(self, bot: core.Panda):
+        self.bot: core.Panda = bot
 
     # TODO: Implement new syntax where !d name     means any clan
     #                                  !d name,    means no clan
     @commands.cooldown(rate=3, per=60, type=commands.BucketType.user)
     @commands.command(aliases=["d"], brief="Find a deck by nickname and clan")
-    async def deck(self, ctx, *, query: str | None=None):
+    async def deck(self, ctx: commands.Context, *, query: str | None = None):
         """Searches an opponent's deck by name and clan.
 
         Both arguments can be partial matches if you can't enter some of the characters from either.
@@ -40,7 +42,7 @@ class Search(commands.Cog, name="🔎 Search"):
 
     @commands.cooldown(rate=1, per=180, type=commands.BucketType.user)
     @commands.command(aliases=["s", "ss"], brief="Find a deck by screenshot")
-    async def screenshot(self, ctx):
+    async def screenshot(self, ctx: commands.Context):
         """Searches an opponent's deck by a screenshot of the match.
         Useful if your opponent's name or clan is in a different language and contains symbols you cannot enter.
 

@@ -1,22 +1,24 @@
 import asyncio
 import base64
 import json
-from anthropic import APIStatusError, AsyncAnthropic
-from anthropic.types import TextBlock
-from config import PROMPT
 import time
 
-CLAUDE_DEFAULT_VERSION = "claude-sonnet-4-6"
+import anthropic
 
-async def extract_player_info(client: AsyncAnthropic, image_bytes: bytes, retries: int = 3) -> dict | None:
+from . import const
+
+
+async def extract_player_info(
+    client: anthropic.AsyncAnthropic, image_bytes: bytes, retries: int = 3
+) -> dict | None:
     b64 = base64.b64encode(image_bytes).decode("utf-8")
     for attempt in range(retries):
         try:
             start = time.time()
             response = await client.messages.create(
-                model=CLAUDE_DEFAULT_VERSION,
+                model=const.CLAUDE_DEFAULT_VERSION,
                 max_tokens=64,
-                system=PROMPT,
+                system=const.CLAUDE_PROMPT,
                 messages=[
                     {
                         "role": "user",
@@ -37,15 +39,22 @@ async def extract_player_info(client: AsyncAnthropic, image_bytes: bytes, retrie
                     }
                 ],
             )
+            text_block = next(
+                (
+                    block
+                    for block in response.content
+                    if isinstance(block, anthropic.types.TextBlock)
+                ),
+                None,
+            )
             total = time.time() - start
-            text_block = next((block for block in response.content if isinstance(block, TextBlock)), None)
             print(f"Time taken for claude to respond: {total:.2f}s")
 
             if text_block:
                 return json.loads(text_block.text.strip())
-        except APIStatusError as e:
+        except anthropic.APIStatusError:
             if attempt < retries - 1:
                 await asyncio.sleep(1)
             else:
-                raise e
+                raise
     return None
