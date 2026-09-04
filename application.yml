@@ -6,6 +6,8 @@ lavalink:
   server:
     password: ${LAVALINK_PASSWORD}
 
+    bufferDurationMs: 1000
+
     sources:
       youtube: false
       bandcamp: false

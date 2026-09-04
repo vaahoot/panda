@@ -91,7 +91,7 @@ class Music(commands.Cog, name="🎶 Music"):
 
         if not player.playing:
             # Play now since we aren't playing anything...
-            await player.play(player.queue.get(), volume=30)
+            await player.play(player.queue.get())
 
 
 async def setup(bot):
