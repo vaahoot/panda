@@ -61,7 +61,6 @@ class Panda(commands.Bot):
         await self.db.connect()
         await log.info(f"Database connected: {self.db.connection}")
 
-        print(tokens.LAVALINK_PASSWORD)
         nodes = [wavelink.Node(uri="http://lavalink:2333", password=tokens.LAVALINK_PASSWORD)]
         await wavelink.Pool.connect(nodes=nodes, client=self, cache_capacity=None)
 
