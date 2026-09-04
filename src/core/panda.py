@@ -4,6 +4,7 @@ import time
 import aiohttp.client_exceptions
 import anthropic
 import discord
+import wavelink
 from discord.ext import commands
 
 import database
@@ -11,7 +12,7 @@ import log
 from clash import claude, screenshots
 from clash.deck import generate_image
 from clash.scraping import flaresolverr, search
-from config import paths, settings
+from config import paths, settings, tokens
 
 
 class Panda(commands.Bot):
@@ -53,15 +54,20 @@ class Panda(commands.Bot):
         await self.load_extension("cogs.owner")
         await self.load_extension("cogs.settings")
         await self.load_extension("cogs.support")
+        await self.load_extension("cogs.music")
 
         await flaresolverr.create_flaresolverr_session()
 
         await self.db.connect()
         await log.info(f"Database connected: {self.db.connection}")
 
+        print(tokens.LAVALINK_PASSWORD)
+        nodes = [wavelink.Node(uri="http://lavalink:2333", password=tokens.LAVALINK_PASSWORD)]
+        await wavelink.Pool.connect(nodes=nodes, client=self, cache_capacity=None)
+
     async def on_ready(self) -> None:
         assert self.user is not None
-        await log.info(f"Logged in as: {self.user.name}:{self.user.id}")
+        await log.info(f"Logged in as: {self.user.name} | {self.user.id}")
 
         await self.change_presence(activity=discord.CustomActivity("I love bamBOO!"))
 
@@ -196,3 +202,4 @@ class Panda(commands.Bot):
 
         time_taken = time.time() - start
         await log.info(f"Search by image took {time_taken:.2f}s")
+
