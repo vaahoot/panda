@@ -8,6 +8,8 @@ services:
 
     environment:
       - FLARESOLVERR_URL=http://flaresolverr:8191/v1
+      - LAVALINK_URL=lavalink:2333
+      - LAVALINK_PASSWORD=${LAVALINK_PASSWORD}
 
     volumes:
       - ./bot.log:/app/bot.log
@@ -16,6 +18,7 @@ services:
 
     depends_on:
       - flaresolverr
+      - lavalink
 
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
@@ -24,3 +27,15 @@ services:
       - LOG_LEVEL=info
     ports:
       - "8191:8191"
+
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4
+    restart: unless-stopped
+    environment:
+      - _JAVA_OPTIONS=-Xmx1G
+      - LAVALINK_PASSWORD=${LAVALINK_PASSWORD}
+    volumes:
+      - ./application.yml:/opt/Lavalink/application.yml
+    ports:
+      - "2333:2333"
+
