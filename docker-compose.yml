@@ -35,6 +35,7 @@ services:
       - _JAVA_OPTIONS=-Xmx1G
       - LAVALINK_PASSWORD=${LAVALINK_PASSWORD}
       - REFRESH_TOKEN=${REFRESH_TOKEN}
+      - SPOTIFY_API_KEY=${SPOTIFY_API_KEY}
     volumes:
       - ./application.yml:/opt/Lavalink/application.yml
     ports:
