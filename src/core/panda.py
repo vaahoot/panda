@@ -1,5 +1,6 @@
 import io
 import time
+from typing import cast
 
 import aiohttp.client_exceptions
 import anthropic
@@ -13,6 +14,7 @@ from clash import claude, screenshots
 from clash.deck import generate_image
 from clash.scraping import flaresolverr, search
 from config import paths, settings, tokens
+from music import PandaPlayer
 
 
 class Panda(commands.Bot):
@@ -61,7 +63,9 @@ class Panda(commands.Bot):
         await self.db.connect()
         await log.info(f"Database connected: {self.db.connection}")
 
-        nodes = [wavelink.Node(uri="http://lavalink:2333", password=tokens.LAVALINK_PASSWORD)]
+        nodes = [
+            wavelink.Node(uri="http://lavalink:2333", password=tokens.LAVALINK_PASSWORD)
+        ]
         await wavelink.Pool.connect(nodes=nodes, client=self, cache_capacity=None)
 
     async def on_ready(self) -> None:
@@ -202,3 +206,27 @@ class Panda(commands.Bot):
         time_taken = time.time() - start
         await log.info(f"Search by image took {time_taken:.2f}s")
 
+    async def on_wavelink_node_ready(
+        self, payload: wavelink.NodeReadyEventPayload
+    ) -> None:
+        await log.info(
+            f"Wavelink Node connected: {payload.node} | Resumed: {payload.resumed}"
+        )
+
+    async def on_wavelink_track_start(
+        self, payload: wavelink.TrackStartEventPayload
+    ) -> None:
+        player: wavelink.Player | None = payload.player
+        if not player:
+            return
+
+        player = cast("PandaPlayer", player)
+        if player.home is None:
+            return
+
+        track: wavelink.Playable = payload.track
+
+        embed: discord.Embed = discord.Embed(color=settings.MAIN_COLOR)
+        embed.description = f"Now playing **{track.title}** by **{track.author}**"
+
+        await player.home.send(embed=embed)

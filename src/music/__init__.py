@@ -3,4 +3,11 @@ import wavelink
 
 
 class PandaPlayer(wavelink.Player):
-    home: discord.TextChannel | None = None
+    home: (
+        discord.TextChannel
+        | discord.VoiceChannel
+        | discord.StageChannel
+        | discord.Thread
+        | discord.PartialMessageable
+        | None
+    ) = None
