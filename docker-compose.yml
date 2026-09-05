@@ -34,6 +34,7 @@ services:
     environment:
       - _JAVA_OPTIONS=-Xmx1G
       - LAVALINK_PASSWORD=${LAVALINK_PASSWORD}
+      - REFRESH_TOKEN=${REFRESH_TOKEN}
     volumes:
       - ./application.yml:/opt/Lavalink/application.yml
     ports:
