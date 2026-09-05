@@ -39,6 +39,7 @@ plugins:
       refreshToken: ${REFRESH_TOKEN}
 
     clients:
+      - MUSIC
       - TV
       - WEB
 
