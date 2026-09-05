@@ -5,6 +5,11 @@ server:
 lavalink:
   server:
     password: ${LAVALINK_PASSWORD}
+    httpConfig:
+      proxyHost: "isp.decodo.com"
+      proxyPort: 10001
+      proxyUser: ${PROXY_USERNAME}
+      proxyPassword: ${PROXY_PASSWORD}
 
     bufferDurationMs: 1000
 
