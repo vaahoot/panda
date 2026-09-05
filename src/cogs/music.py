@@ -18,15 +18,19 @@ class Music(commands.Cog, name="🎶 Music"):
         if isinstance(ctx.channel, (discord.DMChannel, discord.GroupChannel)):
             return
 
+        embed = discord.Embed(color=settings.ERROR_COLOR)
+
         player: PandaPlayer = cast("PandaPlayer", ctx.voice_client)
         if player is None:
             try:
                 player = await ctx.author.voice.channel.connect(cls=PandaPlayer)
             except AttributeError:
-                await ctx.reply("At least join a voice channel man.")
+                embed.description = "At least join a voice channel man."
+                await ctx.reply(embed=embed)
                 return
             except discord.ClientException:
-                await ctx.reply("I couldn't join the voice channel. Try again!")
+                embed.description = "I couldn't join the voice channel. Try again!"
+                await ctx.reply(embed=embed)
                 return
 
         player.autoplay = wavelink.AutoPlayMode.enabled
@@ -35,23 +39,31 @@ class Music(commands.Cog, name="🎶 Music"):
         if player.home is None:
             player.home = ctx.channel
 
-        tracks: wavelink.Search = await wavelink.Playable.search(query)
+        tracks: wavelink.Search = await wavelink.Playable.search(
+            query, source=wavelink.TrackSource.YouTube
+        )
         if not tracks:
-            await ctx.reply(
+            embed.description = (
                 "Couldn't find any songs with that query. Please try again."
             )
+            await ctx.reply(embed=embed)
             return
+
+        # If we got to this point, the play should be successful, change the color to main.
+        embed.color = settings.MAIN_COLOR
 
         if isinstance(tracks, wavelink.Playlist):
             # tracks is a playlist...
             added: int = await player.queue.put_wait(tracks)
-            await ctx.send(
+            embed.description = (
                 f"Added the playlist **`{tracks.name}`** ({added} songs) to the queue."
             )
+            await ctx.send(embed=embed)
         else:
             track: wavelink.Playable = tracks[0]
             await player.queue.put_wait(track)
-            await ctx.send(f"Added **`{track}`** to the queue.")
+            embed.description = f"Added **`{track}`** to the queue."
+            await ctx.send(embed=embed)
 
         if not player.playing:
             # Play now since we aren't playing anything...
