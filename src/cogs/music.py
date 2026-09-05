@@ -9,10 +9,10 @@ from music import PandaPlayer
 
 
 class Music(commands.Cog, name="🎶 Music"):
-    @commands.command(aliases=["p"])
+    @commands.command(aliases=["p"], brief="Play a track.")
     @commands.guild_only()
     async def play(self, ctx: commands.Context, *, query: str) -> None:
-        """Play a given song"""
+        """Play a given song. Can provide a song name or a url."""
         if ctx.guild is None:
             return
         if isinstance(ctx.channel, (discord.DMChannel, discord.GroupChannel)):
@@ -23,10 +23,10 @@ class Music(commands.Cog, name="🎶 Music"):
             try:
                 player = await ctx.author.voice.channel.connect(cls=PandaPlayer)
             except AttributeError:
-                await ctx.send("At least join a voice channel man.")
+                await ctx.reply("At least join a voice channel man.")
                 return
             except discord.ClientException:
-                await ctx.send("I couldn't join the voice channel. Try again!")
+                await ctx.reply("I couldn't join the voice channel. Try again!")
                 return
 
         player.autoplay = wavelink.AutoPlayMode.enabled
@@ -34,9 +34,6 @@ class Music(commands.Cog, name="🎶 Music"):
         # Lock the player to this voice channel
         if player.home is None:
             player.home = ctx.channel
-        elif player.home != ctx.channel:
-            await ctx.send(f"I'm already playing in {ctx.channel.mention}")
-            return
 
         tracks: wavelink.Search = await wavelink.Playable.search(query)
         if not tracks:
@@ -60,10 +57,10 @@ class Music(commands.Cog, name="🎶 Music"):
             # Play now since we aren't playing anything...
             await player.play(player.queue.get())
 
-    @commands.command()
+    @commands.command(brief="Skip current track.")
     @commands.guild_only()
     async def skip(self, ctx: commands.Context) -> None:
-        """Skip the current song."""
+        """Skip current track."""
         player: PandaPlayer = cast("PandaPlayer", ctx.voice_client)
         if not player:
             await ctx.reply("I'm not even playing anything.")
@@ -72,7 +69,7 @@ class Music(commands.Cog, name="🎶 Music"):
         await player.skip(force=True)
         await ctx.message.add_reaction("\u2705")
 
-    @commands.command(name="toggle", aliases=["pause", "resume"])
+    @commands.command(name="toggle", aliases=["pause", "resume"], brief="Toggle pause.")
     @commands.guild_only()
     async def toggle_pause(self, ctx: commands.Context) -> None:
         """Pause or Resume the Player depending on its current state."""
@@ -84,7 +81,7 @@ class Music(commands.Cog, name="🎶 Music"):
         await player.pause(not player.paused)
         await ctx.message.add_reaction("\u2705")
 
-    @commands.command(aliases=["dc"])
+    @commands.command(aliases=["dc"], brief="Disconnect from the voice channel.")
     @commands.guild_only()
     async def disconnect(self, ctx: commands.Context) -> None:
         """Disconnect the Player."""
@@ -96,10 +93,10 @@ class Music(commands.Cog, name="🎶 Music"):
         await player.disconnect()
         await ctx.message.add_reaction("\u2705")
 
-    @commands.command(aliases=["q"])
+    @commands.command(aliases=["q"], brief="Get the track queue.")
     @commands.guild_only()
     async def queue(self, ctx: commands.Context) -> None:
-        """Output the current queue"""
+        """Get the track queue."""
         player: PandaPlayer = cast("PandaPlayer", ctx.voice_client)
         if player is None:
             await ctx.reply("Not playing anything right now.")
