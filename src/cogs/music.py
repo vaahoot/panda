@@ -117,6 +117,11 @@ class Music(commands.Cog, name="🎶 Music"):
         counter = 1
         embed: discord.Embed = discord.Embed(title="", color=settings.MAIN_COLOR)
 
+        if len(player.queue) <= 0:
+            embed.description = "Nothing in the queue"
+            await ctx.send(embed=embed)
+            return
+
         for track in player.queue:
             embed.add_field(
                 name="",
