@@ -22,14 +22,11 @@ services:
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     restart: unless-stopped
-    dns:
-      - 1.1.1.1
-      - 8.8.8.8
     ports:
       - "8191:8191"
     environment:
       - LOG_LEVEL=info
-      - PROXY_URL=http://isp.decodo.com:10002
+      - PROXY_URL=http://city.decodo.com:21001
       - PROXY_USERNAME=${PROXY_USERNAME}
       - PROXY_PASSWORD=${PROXY_PASSWORD}
 
@@ -41,9 +38,6 @@ services:
       - LAVALINK_PASSWORD=${LAVALINK_PASSWORD}
       - REFRESH_TOKEN=${REFRESH_TOKEN}
       - SPOTIFY_API_KEY=${SPOTIFY_API_KEY}
-
-      - PROXY_USERNAME=${PROXY_USERNAME}
-      - PROXY_PASSWORD=${PROXY_PASSWORD}
     volumes:
       - ./application.yml:/opt/Lavalink/application.yml
     ports:
