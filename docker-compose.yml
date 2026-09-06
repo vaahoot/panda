@@ -8,6 +8,7 @@ services:
 
     environment:
       - FLARESOLVERR_URL=http://flaresolverr:8191/v1
+      - LAVALINK_URL=lavalink:2333
 
     volumes:
       - ./bot.log:/app/bot.log
@@ -16,11 +17,28 @@ services:
 
     depends_on:
       - flaresolverr
+      - lavalink
 
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     restart: unless-stopped
-    environment:
-      - LOG_LEVEL=info
     ports:
       - "8191:8191"
+    environment:
+      - LOG_LEVEL=info
+      - PROXY_URL=http://city.decodo.com:21001
+      - PROXY_USERNAME=${PROXY_USERNAME}
+      - PROXY_PASSWORD=${PROXY_PASSWORD}
+
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4
+    restart: unless-stopped
+    environment:
+      - _JAVA_OPTIONS=-Xmx1G
+      - LAVALINK_PASSWORD=${LAVALINK_PASSWORD}
+      - REFRESH_TOKEN=${REFRESH_TOKEN}
+      - SPOTIFY_API_KEY=${SPOTIFY_API_KEY}
+    volumes:
+      - ./application.yml:/opt/Lavalink/application.yml
+    ports:
+      - "2333:2333"

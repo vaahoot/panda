@@ -1,0 +1,74 @@
+server:
+  port: 2333
+  address: 0.0.0.0
+
+lavalink:
+  server:
+    password: ${LAVALINK_PASSWORD}
+    httpConfig:
+      proxyHost: "isp.decodo.com"
+      proxyPort: 10001
+      proxyUser: ${PROXY_USERNAME}
+      proxyPassword: ${PROXY_PASSWORD}
+
+    bufferDurationMs: 1000
+
+    sources:
+      youtube: false
+      bandcamp: false
+      soundcloud: true
+      twitch: true
+      vimeo: true
+      http: true
+      local: false
+
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:f45bbb7aebfcbc1c553769e04af6cd43afa8b7c3"
+      repository: "https://maven.lavalink.dev/snapshots"
+      snapshot: true
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.3"
+      repository: "https://maven.lavalink.dev/releases"
+      snapshot: false
+
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true # Whether "ytsearch:" and "ytmsearch:" can be used.
+    allowDirectVideoIds: true # Whether just video IDs can match. If false, only complete URLs will be loaded.
+    allowDirectPlaylistIds: true # Whether just playlist IDs can match. If false, only complete URLs will be loaded.
+    # The clients to use for track loading. See below for a list of valid clients.
+    # Clients are queried in the order they are given (so the first client is queried first and so on...)
+
+    remoteCipher:
+      url: "https://cipher.kikkia.dev"
+
+    oauth:
+      enabled: true
+      refreshToken: ${REFRESH_TOKEN}
+
+    clients:
+      - MUSIC
+      - TVHTML5_SIMPLY
+      - TV
+      - WEB
+      - WEBEMBEDDED
+
+  lavasrc:
+    providers:
+      - "ytsearch:\"%ISRC%\""
+      - "ytsearch:%QUERY%"
+    sources:
+      spotify: true
+      youtube: false
+
+    spotify:
+      clientId: "d4b4f7113d2449fbbc59911e44072e49"
+      clientSecret: ${SPOTIFY_API_KEY}
+      countryCode: "US"
+      playlistLoadLimit: 6
+      albumLoadLimit: 6
+
+logging:
+  level:
+    root: INFO
+    lavalink: INFO
