@@ -48,8 +48,10 @@ plugins:
 
     clients:
       - MUSIC
+      - TVHTML5_SIMPLY
       - TV
       - WEB
+      - WEBEMBEDDED
 
   lavasrc:
     providers:
@@ -65,8 +67,6 @@ plugins:
       countryCode: "US"
       playlistLoadLimit: 6
       albumLoadLimit: 6
-
-
 
 logging:
   level:
