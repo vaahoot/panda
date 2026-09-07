@@ -227,6 +227,6 @@ class Panda(commands.Bot):
         track: wavelink.Playable = payload.track
 
         embed: discord.Embed = discord.Embed(color=settings.MAIN_COLOR)
-        embed.description = f"Now playing **{track.title}** by **{track.author}**"
+        embed.description = f"Now playing **{track.title}**"
 
         await player.home.send(embed=embed)

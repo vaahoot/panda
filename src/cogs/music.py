@@ -114,18 +114,37 @@ class Music(commands.Cog, name="🎶 Music"):
             await ctx.reply("Not playing anything right now.")
             return
 
-        counter = 1
-        embed: discord.Embed = discord.Embed(title="", color=settings.MAIN_COLOR)
+        embed: discord.Embed = discord.Embed(color=settings.MAIN_COLOR)
+        queue: wavelink.Queue
 
-        if len(player.queue) <= 0:
+        if len(player.queue) > 0:
+            embed.title = "Your queue"
+            queue = player.queue
+        else:
+            embed.title = "Auto queue"
+            queue = player.auto_queue
+
+        if len(queue) <= 0:
             embed.description = "Nothing in the queue"
             await ctx.send(embed=embed)
             return
 
-        for track in player.queue:
+        counter = 1
+        if player.current is not None:
             embed.add_field(
                 name="",
-                value=f"{counter}. **{track.title}** by **{track.author}**",
+                value=f"{counter}. **{player.current.title}**",
+                inline=False
+            )
+            counter += 1
+
+        for track in queue:
+            if counter > 10:
+                break
+
+            embed.add_field(
+                name="",
+                value=f"{counter}. **{track.title}**",
                 inline=False,
             )
             counter += 1
