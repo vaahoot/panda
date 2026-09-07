@@ -125,6 +125,7 @@ class Music(commands.Cog, name="🎶 Music"):
             queue = player.auto_queue
 
         if len(queue) <= 0:
+            embed.title = ""
             embed.description = "Nothing in the queue"
             await ctx.send(embed=embed)
             return
@@ -132,9 +133,7 @@ class Music(commands.Cog, name="🎶 Music"):
         counter = 1
         if player.current is not None:
             embed.add_field(
-                name="",
-                value=f"{counter}. **{player.current.title}**",
-                inline=False
+                name="", value=f"{counter}. **{player.current.title}**", inline=False
             )
             counter += 1
 
@@ -149,6 +148,47 @@ class Music(commands.Cog, name="🎶 Music"):
             )
             counter += 1
 
+        await ctx.send(embed=embed)
+
+    @commands.command(aliases=["repeat"], brief="Loop track/queue/off.")
+    @commands.guild_only()
+    async def loop(self, ctx: commands.Context, mode: str | None = None):
+        """Loop track/queue/off.
+        Not providing an option will turn on track loop."""
+        player: PandaPlayer = cast("PandaPlayer", ctx.voice_client)
+        if player is None:
+            await ctx.reply("Not playing anything right now.")
+            return
+
+        embed: discord.Embed = discord.Embed(color=settings.MAIN_COLOR)
+        if mode is None or mode == "track":
+            player.queue.mode = wavelink.QueueMode.loop
+            embed.description = "Current track will now loop."
+        elif mode == "queue":
+            player.queue.mode = wavelink.QueueMode.loop_all
+            embed.description = "Your queue will now loop."
+        elif mode == "off":
+            player.queue.mode = wavelink.QueueMode.normal
+            embed.description = "Looping disabled."
+        else:
+            embed.color = settings.ERROR_COLOR
+            embed.description = "Invalid option. I need `track`, `queue` or `off`."
+
+        await ctx.send(embed=embed)
+
+    @commands.command(brief="Shuffle the queue.")
+    @commands.guild_only()
+    async def shuffle(self, ctx: commands.Context):
+        """Shuffle the queue."""
+        player: PandaPlayer = cast("PandaPlayer", ctx.voice_client)
+        if player is None:
+            await ctx.reply("Not playing anything right now.")
+            return
+
+        player.queue.shuffle()
+        embed = discord.Embed(
+            description="Shuffled your queue.", color=settings.MAIN_COLOR
+        )
         await ctx.send(embed=embed)
 
 
