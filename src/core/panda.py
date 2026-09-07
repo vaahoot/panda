@@ -225,8 +225,10 @@ class Panda(commands.Bot):
             return
 
         track: wavelink.Playable = payload.track
-        if player.queue.history and track == player.queue.history.get():
+        if track == player.last_track:  # Do not re-announce the song if it's looped.
             return
+
+        player.last_track = track
 
         embed: discord.Embed = discord.Embed(color=settings.MAIN_COLOR)
         embed.description = f"Now playing **{track.title}**"
