@@ -68,7 +68,7 @@ class Music(commands.Cog, name="🎶 Music"):
         else:
             track: wavelink.Playable = tracks[0]
             await player.queue.put_wait(track)
-            embed.description = f"Added **`{track}`** to the queue."
+            embed.description = f"Added **{track}** by **{track.author}** to the queue."
             await ctx.send(embed=embed)
 
         if not player.playing:

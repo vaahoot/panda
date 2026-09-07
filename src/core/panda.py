@@ -231,6 +231,6 @@ class Panda(commands.Bot):
         player.last_track = track
 
         embed: discord.Embed = discord.Embed(color=settings.MAIN_COLOR)
-        embed.description = f"Now playing **{track.title}**"
+        embed.description = f"Now playing **{track.title}** by **{track.author}**"
 
         await player.home.send(embed=embed)
