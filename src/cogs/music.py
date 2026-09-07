@@ -35,13 +35,19 @@ class Music(commands.Cog, name="🎶 Music"):
 
         player.autoplay = wavelink.AutoPlayMode.enabled
 
+        try:
+            tracks: wavelink.Search = await wavelink.Playable.search(
+                query, source=wavelink.TrackSource.YouTube
+            )
+        except wavelink.exceptions.LavalinkLoadException:
+            embed.description = "Couldn't load that track, try something else."            
+            await ctx.reply(embed=embed)
+            return
+
         # Lock the player to this voice channel
         if player.home is None:
             player.home = ctx.channel
 
-        tracks: wavelink.Search = await wavelink.Playable.search(
-            query, source=wavelink.TrackSource.YouTube
-        )
         if not tracks:
             embed.description = (
                 "Couldn't find any songs with that query. Please try again."
