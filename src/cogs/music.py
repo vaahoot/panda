@@ -160,7 +160,7 @@ class Music(commands.Cog, name="🎶 Music"):
 
     @commands.command(aliases=["repeat"], brief="Loop track/queue/off.")
     @commands.guild_only()
-    async def loop(self, ctx: commands.Context, mode: str | None = None):
+    async def loop(self, ctx: commands.Context, mode: str = "track"):
         """Loop track/queue/off.
         Not providing an option will turn on track loop."""
         player: PandaPlayer = cast("PandaPlayer", ctx.voice_client)
@@ -169,7 +169,7 @@ class Music(commands.Cog, name="🎶 Music"):
             return
 
         embed: discord.Embed = discord.Embed(color=settings.MAIN_COLOR)
-        if mode is None or mode == "track":
+        if mode == "track":
             player.queue.mode = wavelink.QueueMode.loop
             embed.description = "Current track will now loop."
         elif mode == "queue":
