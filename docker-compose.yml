@@ -23,16 +23,15 @@ services:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     restart: unless-stopped
     ports:
-      - "8191:8191"
+      - 8191:8191
     environment:
       - LOG_LEVEL=info
-      - PROXY_URL=http://city.decodo.com:21001
-      - PROXY_USERNAME=${PROXY_USERNAME}
-      - PROXY_PASSWORD=${PROXY_PASSWORD}
 
   lavalink:
     image: ghcr.io/lavalink-devs/lavalink:4
     restart: unless-stopped
+    depends_on:
+      - spotify-tokener
     environment:
       - _JAVA_OPTIONS=-Xmx1G
       - LAVALINK_PASSWORD=${LAVALINK_PASSWORD}
@@ -41,4 +40,11 @@ services:
     volumes:
       - ./application.yml:/opt/Lavalink/application.yml
     ports:
-      - "2333:2333"
+      - 2333:2333
+
+  spotify-tokener:
+    image: ghcr.io/topi314/spotify-tokener:master
+    container_name: spotify-tokener
+    restart: unless-stopped
+    ports:
+      - 8080:8080

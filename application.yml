@@ -68,6 +68,9 @@ plugins:
       playlistLoadLimit: 6
       albumLoadLimit: 6
 
+      preferPartnerAPI: true  # Force to use spotify-token API instead of official Spotify API.
+      customTokenEndpoint: "http://spotify-tokener:8080/api/token"
+
 logging:
   level:
     root: INFO
