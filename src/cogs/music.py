@@ -139,7 +139,9 @@ class Music(commands.Cog, name="🎶 Music"):
         counter = 1
         if player.current is not None:
             embed.add_field(
-                name="", value=f"{counter}. **{player.current.title}**", inline=False
+                name="",
+                value=f"{counter}. **{player.current.title}** by **{player.current.author}**",
+                inline=False
             )
             counter += 1
 
@@ -149,7 +151,7 @@ class Music(commands.Cog, name="🎶 Music"):
 
             embed.add_field(
                 name="",
-                value=f"{counter}. **{track.title}**",
+                value=f"{counter}. **{track.title}** by **{track.author}**",
                 inline=False,
             )
             counter += 1
