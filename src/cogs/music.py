@@ -168,11 +168,11 @@ class Music(commands.Cog, name="🎶 Music"):
             await ctx.send(embed=embed)
             return
 
-        counter = 1
+        counter = 0
         if player.current is not None:
             embed.add_field(
                 name="",
-                value=f"{counter}. **{player.current.title}** by **{player.current.author}**",
+                value=f"{counter}. [**{player.current.title}**]({player.current.uri}) by **{player.current.author}**",
                 inline=False
             )
             counter += 1
@@ -183,7 +183,7 @@ class Music(commands.Cog, name="🎶 Music"):
 
             embed.add_field(
                 name="",
-                value=f"{counter}. **{track.title}** by **{track.author}**",
+                value=f"{counter}. [**{track.title}**]({track.uri}) by **{track.author}**",
                 inline=False,
             )
             counter += 1
