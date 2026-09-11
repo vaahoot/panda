@@ -206,31 +206,3 @@ class Panda(commands.Bot):
         time_taken = time.time() - start
         await log.info(f"Search by image took {time_taken:.2f}s")
 
-    async def on_wavelink_node_ready(
-        self, payload: wavelink.NodeReadyEventPayload
-    ) -> None:
-        await log.info(
-            f"Wavelink Node connected: {payload.node} | Resumed: {payload.resumed}"
-        )
-
-    async def on_wavelink_track_start(
-        self, payload: wavelink.TrackStartEventPayload
-    ) -> None:
-        player: wavelink.Player | None = payload.player
-        if not player:
-            return
-
-        player = cast("PandaPlayer", player)
-        if player.home is None:
-            return
-
-        track: wavelink.Playable = payload.track
-        if track == player.last_track:  # Do not re-announce the song if it's looped.
-            return
-
-        player.last_track = track
-
-        embed: discord.Embed = discord.Embed(color=settings.MAIN_COLOR)
-        embed.description = f"Now playing **{track.title}** by **{track.author}**"
-
-        await player.home.send(embed=embed)

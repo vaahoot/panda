@@ -4,11 +4,43 @@ import discord
 import wavelink
 from discord.ext import commands
 
+import log
 from config import settings
 from music import PandaPlayer
 
 
 class Music(commands.Cog, name="🎶 Music"):
+    @commands.Cog.listener()
+    async def on_wavelink_node_ready(
+        self, payload: wavelink.NodeReadyEventPayload
+    ) -> None:
+        await log.info(
+            f"Wavelink Node connected: {payload.node} | Resumed: {payload.resumed}"
+        )
+
+    @commands.Cog.listener()
+    async def on_wavelink_track_start(
+        self, payload: wavelink.TrackStartEventPayload
+    ) -> None:
+        player: wavelink.Player | None = payload.player
+        if not player:
+            return
+
+        player = cast("PandaPlayer", player)
+        if player.home is None:
+            return
+
+        track: wavelink.Playable = payload.track
+        if track == player.last_track:  # Do not re-announce the song if it's looped.
+            return
+
+        player.last_track = track
+
+        embed: discord.Embed = discord.Embed(color=settings.MAIN_COLOR)
+        embed.description = f"Now playing **{track.title}** by **{track.author}**"
+
+        await player.home.send(embed=embed)
+
     @commands.command(aliases=["p"], brief="Play a track.")
     @commands.guild_only()
     async def play(self, ctx: commands.Context, *, query: str) -> None:
