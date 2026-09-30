@@ -23,9 +23,12 @@ services:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     restart: unless-stopped
     ports:
-      - 8191:8191
+      - 127.0.0.1:8191:8191
     environment:
       - LOG_LEVEL=info
+      - PROXY_URL=${PROXY_URL}
+      - PROXY_USERNAME=${PROXY_USERNAME}
+      - PROXY_PASSWORD=${PROXY_PASSWORD}
 
   lavalink:
     image: ghcr.io/lavalink-devs/lavalink:4

@@ -14,6 +14,6 @@ CR_API_CLAN_MEMBERS = "https://proxy.royaleapi.dev/v1/clans/{0}/members"
 
 CR_API_HEADERS = {"Authorization": f"Bearer {tokens.CR_API_KEY}"}
 
-FLARESOLVERR_URL = os.getenv("FLARESOLVERR_URL", "http://localhost:8191/v1")
+FLARESOLVERR_URL = os.getenv("FLARESOLVERR_URL", "http://flaresolverr:8191/v1")
 FLARESOLVERR_TIMEOUT_MS = 60000
 

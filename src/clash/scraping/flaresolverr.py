@@ -25,7 +25,7 @@ async def create_flaresolverr_session() -> None:
             search_settings.FLARESOLVERR_URL,
             json={
                 "cmd": "request.get",
-                "url": search_settings.ROYALE_API_PLAYER_SEARCH,
+                "url": search_settings.ROYALE_API_PLAYER_SEARCH.format("test"),
                 "session": FLARESOLVERR_SESSION,
                 "maxTimeout": search_settings.FLARESOLVERR_TIMEOUT_MS,
             },
