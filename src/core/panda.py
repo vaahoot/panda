@@ -1,6 +1,5 @@
 import io
 import time
-from typing import cast
 
 import aiohttp.client_exceptions
 import anthropic
@@ -14,7 +13,6 @@ from clash import claude, screenshots
 from clash.deck import generate_image
 from clash.scraping import flaresolverr, search
 from config import paths, settings, tokens
-from music import PandaPlayer
 
 
 class Panda(commands.Bot):

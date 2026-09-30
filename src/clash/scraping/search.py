@@ -1,4 +1,5 @@
 import unicodedata
+import urllib.parse
 
 import aiohttp
 import bs4
@@ -28,15 +29,20 @@ async def search(link: str, selector: str) -> str:
 
 
 async def search_player_by_name(name: str) -> str:
-    link = search_settings.ROYALE_API_PLAYER_SEARCH.format(name)
+    link = search_settings.ROYALE_API_PLAYER_SEARCH.format(urllib.parse.quote(name))
     search_result_selector = ".player_search_results__container"
     return await search(link, search_result_selector)
 
 
-async def search_clans_by_name(clan: str) -> str:
-    link = search_settings.ROYALE_API_CLAN_SEARCH.format(clan)
-    search_result_selector = ".three.doubling.stackable.cards"
-    return await search(link, search_result_selector)
+async def search_clans_by_name(clan: str) -> dict:
+    endpoint = search_settings.CR_API_CLAN_SEARCH.format(urllib.parse.quote(clan))
+
+    async with (
+        aiohttp.ClientSession() as session,
+        session.get(endpoint, headers=search_settings.CR_API_HEADERS) as response,
+    ):
+        response.raise_for_status()
+        return await response.json()
 
 
 def parse_players(html: str) -> list[dict]:
@@ -71,6 +77,7 @@ def parse_players(html: str) -> list[dict]:
     return players
 
 
+# Not used anymore, will delete if searching clans using official API doesn't work out well.
 def parse_clans(html: str) -> list[str]:
     soup = bs4.BeautifulSoup(html, "html.parser")
     results = soup.find_all("div", class_="clanresult")
@@ -100,7 +107,7 @@ def find_player_tag(players: list[dict], clan: str | None) -> str | None:
 
 
 async def get_battle_log(tag: str) -> list[dict]:
-    url = search_settings.CR_API_BATTLE_LOG.format(tag.replace("#", "%23"))
+    url = search_settings.CR_API_BATTLE_LOG.format(urllib.parse.quote(tag))
     async with aiohttp.ClientSession() as session:  # noqa: SIM117
         async with session.get(url, headers=search_settings.CR_API_HEADERS) as response:
             response.raise_for_status()
@@ -108,7 +115,7 @@ async def get_battle_log(tag: str) -> list[dict]:
 
 
 async def get_clan_members(clan_tag: str) -> dict:
-    url = search_settings.CR_API_CLAN_MEMBERS.format(clan_tag)
+    url = search_settings.CR_API_CLAN_MEMBERS.format(urllib.parse.quote(clan_tag))
     async with aiohttp.ClientSession() as session:  # noqa: SIM117
         async with session.get(url, headers=search_settings.CR_API_HEADERS) as response:
             response.raise_for_status()
@@ -123,11 +130,12 @@ def find_member_in_clan(data: dict, name: str) -> str | None:
     return None
 
 
-async def search_player_in_clans(clans: list[str], name: str) -> str | None:
-    for clan_tag in clans:
-        data = await get_clan_members(clan_tag)
-        member_tag = find_member_in_clan(data, name)
-        if member_tag:
+async def search_player_in_clans(data: dict, name: str) -> str | None:
+    clans = data["items"]
+    for clan in clans:
+        members = await get_clan_members(clan.get("tag"))
+        member_tag = find_member_in_clan(members, name)
+        if member_tag is not None:
             return member_tag
     return None
 
@@ -146,8 +154,8 @@ async def find_deck_by_name(name: str, clan: str | None) -> list[dict[str, str]]
 
 
 async def find_deck_by_clan(name: str, clan: str) -> list[dict[str, str]] | None:
-    search_clans = await search_clans_by_name(clan)
-    clans = parse_clans(search_clans)
+    # search_clans = await search_clans_by_name(clan)
+    clans = await search_clans_by_name(clan)
     member_tag = await search_player_in_clans(clans, name)
 
     if not member_tag:
@@ -162,9 +170,9 @@ async def find_deck(name: str, clan: str | None) -> list[dict[str, str]] | None:
     if not clan:
         return await find_deck_by_name(name, clan)
 
-    deck = await find_deck_by_name(name, clan)
+    deck = await find_deck_by_clan(name, clan)
     if not deck:
-        deck = await find_deck_by_clan(name, clan)
+        deck = await find_deck_by_name(name, clan)
 
     if not deck:
         await log.info(f"Player {name} not found")
