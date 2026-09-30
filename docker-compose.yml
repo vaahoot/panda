@@ -43,7 +43,7 @@ services:
     volumes:
       - ./application.yml:/opt/Lavalink/application.yml
     ports:
-      - 2333:2333
+      - 127.0.0.1:2333:2333
 
   spotify-tokener:
     image: ghcr.io/topi314/spotify-tokener:master

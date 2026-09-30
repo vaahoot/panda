@@ -41,7 +41,7 @@ class Music(commands.Cog, name="🎶 Music"):
 
         await player.home.send(embed=embed)
 
-    @commands.command(aliases=["p"], brief="Play a track.")
+    @commands.command(aliases=["p", "P"], brief="Play a track.")
     @commands.guild_only()
     async def play(self, ctx: commands.Context, *, query: str) -> None:
         """Play a given song. Can provide a song name or a url."""
@@ -107,7 +107,7 @@ class Music(commands.Cog, name="🎶 Music"):
             # Play now since we aren't playing anything...
             await player.play(player.queue.get())
 
-    @commands.command(brief="Skip current track.")
+    @commands.command(aliases=["s", "S"], brief="Skip current track.")
     @commands.guild_only()
     async def skip(self, ctx: commands.Context) -> None:
         """Skip current track."""
@@ -143,7 +143,7 @@ class Music(commands.Cog, name="🎶 Music"):
         await player.disconnect()
         await ctx.message.add_reaction("\u2705")
 
-    @commands.command(aliases=["q"], brief="Get the track queue.")
+    @commands.command(aliases=["q", "Q"], brief="Get the track queue.")
     @commands.guild_only()
     async def queue(self, ctx: commands.Context) -> None:
         """Get the track queue."""
