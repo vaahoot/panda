@@ -181,7 +181,7 @@ class Panda(commands.Bot):
             url = attachments[0].url
 
             image_bytes = await screenshots.process_image(
-                url, self.template_gray, self.mask
+                await attachments[0].read(), self.template_gray, self.mask
             )
             player_info = await claude.extract_player_info(
                 self.claude_client, image_bytes

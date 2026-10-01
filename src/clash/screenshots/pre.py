@@ -4,7 +4,15 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-import log
+# Shield scale relative to screenshot width, measured on real screenshots (0.826-0.845)
+SCALE_PER_WIDTH = 0.000835
+SCALE_SPREAD = 0.15
+
+DOWNSCALE_FACTOR = 0.25
+FINE_PAD = 32
+FINE_RANGE = 0.08
+FINE_STEP = 0.16 / 6
+MERGE_PX = 3
 
 
 @dataclass
@@ -35,112 +43,91 @@ def load_template(template_path: str | pathlib.Path) -> tuple[np.ndarray, np.nda
     return template_gray, mask
 
 
-async def find_shield(
+def _match_at_scale(
+    img: np.ndarray, template_gray: np.ndarray, mask: np.ndarray, scale: float
+) -> tuple[float, tuple[int, int], int, int] | None:
+    t_h, t_w = template_gray.shape
+    new_w, new_h = int(t_w * scale), int(t_h * scale)
+
+    if new_w < 4 or new_h < 4 or new_w >= img.shape[1] or new_h >= img.shape[0]:
+        return None
+
+    scaled_t = cv2.resize(template_gray, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    scaled_m = cv2.resize(mask, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
+
+    result = cv2.matchTemplate(img, scaled_t, cv2.TM_CCOEFF_NORMED, mask=scaled_m)
+    result[~np.isfinite(result)] = -1
+    _, conf, _, loc = cv2.minMaxLoc(result)
+
+    return conf, loc, new_w, new_h
+
+
+def _search(
     img_gray: np.ndarray,
     template_gray: np.ndarray,
     mask: np.ndarray,
-    confidence_threshold: float = 0.8,
+    coarse_scales: np.ndarray,
 ) -> ShieldMatch | None:
     img_h, img_w = img_gray.shape
     t_h, t_w = template_gray.shape
 
-    downscale_factor = 0.25
     coarse_img = cv2.resize(
         img_gray,
         (0, 0),
-        fx=downscale_factor,
-        fy=downscale_factor,
+        fx=DOWNSCALE_FACTOR,
+        fy=DOWNSCALE_FACTOR,
         interpolation=cv2.INTER_AREA,
     )
 
-    max_scale = min(img_w / t_w, img_h / t_h) * 0.95
-    max_scale = max(1.5, max_scale)
-
-    num_steps = max(20, int((max_scale - 0.15) / 0.05))
-    coarse_scales = np.linspace(0.15, max_scale, num_steps)
-
     coarse_candidates = []
-
     for scale in coarse_scales:
-        eff_scale = scale * downscale_factor
-        new_w, new_h = int(t_w * eff_scale), int(t_h * eff_scale)
-
-        if (
-            new_w < 4
-            or new_h < 4
-            or new_w >= coarse_img.shape[1]
-            or new_h >= coarse_img.shape[0]
-        ):
-            continue
-
-        scaled_t = cv2.resize(
-            template_gray, (new_w, new_h), interpolation=cv2.INTER_AREA
+        match = _match_at_scale(
+            coarse_img, template_gray, mask, scale * DOWNSCALE_FACTOR
         )
-        scaled_m = cv2.resize(mask, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
-
-        result = cv2.matchTemplate(
-            coarse_img, scaled_t, cv2.TM_CCOEFF_NORMED, mask=scaled_m
-        )
-        _, conf, _, loc = cv2.minMaxLoc(result)
-
-        if np.isnan(conf) or np.isinf(conf):
-            continue
-
-        coarse_candidates.append(
-            {"x": loc[0], "y": loc[1], "conf": conf, "scale": scale}
-        )
+        if match is not None:
+            conf, loc, _, _ = match
+            coarse_candidates.append((conf, loc[0], loc[1], scale))
 
     if not coarse_candidates:
         return None
 
-    coarse_candidates.sort(key=lambda c: c["conf"], reverse=True)
-    top_candidates = coarse_candidates[:3]
+    coarse_candidates.sort(reverse=True)
 
-    absolute_best_match: ShieldMatch | None = None
+    # The top candidates are usually the same spot at neighbouring scales,
+    # so merge them into one region with a combined scale range
+    groups: list[dict] = []
+    for _, x, y, scale in coarse_candidates[:3]:
+        for group in groups:
+            if abs(group["x"] - x) <= MERGE_PX and abs(group["y"] - y) <= MERGE_PX:
+                group["lo"] = min(group["lo"], scale)
+                group["hi"] = max(group["hi"], scale)
+                break
+        else:
+            groups.append({"x": x, "y": y, "lo": scale, "hi": scale})
 
-    for candidate in top_candidates:
-        cx = int(candidate["x"] / downscale_factor)
-        cy = int(candidate["y"] / downscale_factor)
-        best_scale = candidate["scale"]
+    best: ShieldMatch | None = None
 
-        rough_w = int(t_w * best_scale)
-        rough_h = int(t_h * best_scale)
+    for group in groups:
+        cx = int(group["x"] / DOWNSCALE_FACTOR)
+        cy = int(group["y"] / DOWNSCALE_FACTOR)
+        lo = max(0.1, group["lo"] - FINE_RANGE)
+        hi = group["hi"] + FINE_RANGE
 
-        pad = 80
-        roi_x1 = max(0, cx - pad)
-        roi_y1 = max(0, cy - pad)
-        roi_x2 = min(img_w, cx + rough_w + pad)
-        roi_y2 = min(img_h, cy + rough_h + pad)
-
+        roi_x1 = max(0, cx - FINE_PAD)
+        roi_y1 = max(0, cy - FINE_PAD)
+        roi_x2 = min(img_w, cx + int(t_w * hi) + FINE_PAD)
+        roi_y2 = min(img_h, cy + int(t_h * hi) + FINE_PAD)
         fine_img = img_gray[roi_y1:roi_y2, roi_x1:roi_x2]
-        fine_scales = np.linspace(max(0.1, best_scale - 0.08), best_scale + 0.08, 7)
 
+        fine_scales = np.linspace(lo, hi, int(round((hi - lo) / FINE_STEP)) + 1)
         for scale in fine_scales:
-            new_w, new_h = int(t_w * scale), int(t_h * scale)
-
-            if (
-                new_w >= fine_img.shape[1]
-                or new_h >= fine_img.shape[0]
-                or new_w < 4
-                or new_h < 4
-            ):
+            match = _match_at_scale(fine_img, template_gray, mask, scale)
+            if match is None:
                 continue
 
-            scaled_t = cv2.resize(
-                template_gray, (new_w, new_h), interpolation=cv2.INTER_AREA
-            )
-            scaled_m = cv2.resize(mask, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
-
-            result = cv2.matchTemplate(
-                fine_img, scaled_t, cv2.TM_CCOEFF_NORMED, mask=scaled_m
-            )
-            _, conf, _, loc = cv2.minMaxLoc(result)
-
-            if np.isnan(conf) or np.isinf(conf):
-                continue
-
-            if absolute_best_match is None or conf > absolute_best_match.confidence:
-                absolute_best_match = ShieldMatch(
+            conf, loc, new_w, new_h = match
+            if best is None or conf > best.confidence:
+                best = ShieldMatch(
                     x=roi_x1 + int(loc[0]),
                     y=roi_y1 + int(loc[1]),
                     w=new_w,
@@ -149,15 +136,38 @@ async def find_shield(
                     scale=float(scale),
                 )
 
-    if absolute_best_match is None:
-        return None
+    return best
 
-    await log.info(
-        f"Final confidence: {absolute_best_match.confidence:.2f} at scale {absolute_best_match.scale:.2f}"
-    )
 
-    return (
-        absolute_best_match
-        if absolute_best_match.confidence >= confidence_threshold
-        else None
+def find_shield(
+    img_gray: np.ndarray,
+    template_gray: np.ndarray,
+    mask: np.ndarray,
+    screenshot_width: int,
+    confidence_threshold: float = 0.8,
+) -> ShieldMatch | None:
+    """CPU-bound, run it in a thread."""
+    # Fast path: the shield scales with screenshot width
+    expected = screenshot_width * SCALE_PER_WIDTH
+    match = _search(
+        img_gray,
+        template_gray,
+        mask,
+        np.linspace(expected * (1 - SCALE_SPREAD), expected * (1 + SCALE_SPREAD), 7),
     )
+    if match is not None and match.confidence >= confidence_threshold:
+        return match
+
+    # Fallback: full scale range
+    img_h, img_w = img_gray.shape
+    t_h, t_w = template_gray.shape
+    max_scale = max(1.5, min(img_w / t_w, img_h / t_h) * 0.95)
+    num_steps = max(20, int((max_scale - 0.15) / 0.05))
+
+    match = _search(
+        img_gray, template_gray, mask, np.linspace(0.15, max_scale, num_steps)
+    )
+    if match is not None and match.confidence >= confidence_threshold:
+        return match
+
+    return None

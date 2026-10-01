@@ -1,9 +1,7 @@
-import io
+import asyncio
 
-import aiohttp
 import cv2
 import numpy as np
-from PIL import Image
 
 import log
 
@@ -18,25 +16,19 @@ def decode_image(image_bytes: bytes) -> np.ndarray:
     return img_cv
 
 
-def to_png_bytes(img_rgb: np.ndarray) -> bytes:
-    buf = io.BytesIO()
-    Image.fromarray(img_rgb).save(buf, format="PNG", optimize=True)
-    return buf.getvalue()
+def to_png_bytes(img_bgr: np.ndarray) -> bytes:
+    ok, buf = cv2.imencode(".png", img_bgr)
+    if not ok:
+        raise ValueError("Could not encode image as PNG.")
+    return buf.tobytes()
 
 
-async def process_image(
-    image_url: str,
+def _crop(
+    image_bytes: bytes,
     template_gray: np.ndarray,
     mask: np.ndarray,
-    padding: int = 10,
-) -> bytes:
-
-    async with aiohttp.ClientSession() as session:  # noqa: SIM117
-        async with session.get(image_url) as response:
-            if response.status != 200:
-                raise ValueError(f"Failed to fetch image: HTTP {response.status}")
-            image_bytes = await response.read()
-
+    padding: int,
+) -> tuple[bytes, pre.ShieldMatch | None]:
     img_cv = decode_image(image_bytes)
     height, width = img_cv.shape[:2]
 
@@ -49,14 +41,11 @@ async def process_image(
     search_region = img_cv[search_y_start:search_y_end, :search_x_end]
     search_gray = cv2.cvtColor(search_region, cv2.COLOR_BGR2GRAY)
 
-    match = await pre.find_shield(search_gray, template_gray, mask)
+    match = pre.find_shield(search_gray, template_gray, mask, width)
 
     if match is None:
-        await log.warning("Shield not found, cropping manually")
-
         manual_crop = img_cv[manual_y_start:search_y_end, :manual_x_end]
-        fallback_rgb = cv2.cvtColor(manual_crop, cv2.COLOR_BGR2RGB)
-        return to_png_bytes(fallback_rgb)
+        return to_png_bytes(manual_crop), None
 
     global_match_y = match.y + search_y_start
 
@@ -65,7 +54,24 @@ async def process_image(
     crop_x2 = manual_x_end
     crop_y2 = min(search_y_end, global_match_y + match.h + padding)
 
-    cropped_bgr = img_cv[crop_y1:crop_y2, crop_x1:crop_x2]
-    cropped_rgb = cv2.cvtColor(cropped_bgr, cv2.COLOR_BGR2RGB)
+    return to_png_bytes(img_cv[crop_y1:crop_y2, crop_x1:crop_x2]), match
 
-    return to_png_bytes(cropped_rgb)
+
+async def process_image(
+    image_bytes: bytes,
+    template_gray: np.ndarray,
+    mask: np.ndarray,
+    padding: int = 10,
+) -> bytes:
+    png_bytes, match = await asyncio.to_thread(
+        _crop, image_bytes, template_gray, mask, padding
+    )
+
+    if match is None:
+        await log.warning("Shield not found, cropping manually")
+    else:
+        await log.info(
+            f"Final confidence: {match.confidence:.2f} at scale {match.scale:.2f}"
+        )
+
+    return png_bytes
