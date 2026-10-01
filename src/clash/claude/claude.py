@@ -17,7 +17,7 @@ async def extract_player_info(
             start = time.time()
             response = await client.messages.create(
                 model=const.CLAUDE_DEFAULT_VERSION,
-                max_tokens=64,
+                max_tokens=128,
                 system=const.CLAUDE_PROMPT,
                 messages=[
                     {
