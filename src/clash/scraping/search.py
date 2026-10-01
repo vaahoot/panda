@@ -1,3 +1,4 @@
+import asyncio
 import unicodedata
 import urllib.parse
 
@@ -5,6 +6,7 @@ import aiohttp
 import bs4
 
 import log
+import net
 from clash.deck import get_deck
 from config import search_settings
 
@@ -34,15 +36,24 @@ async def search_player_by_name(name: str) -> str:
     return await search(link, search_result_selector)
 
 
+async def cr_api_get(url: str):
+    """GET from the CR API proxy, retrying the random 5xx errors (mostly 520) it returns."""
+    for attempt in range(search_settings.CR_API_RETRIES):
+        try:
+            async with net.session().get(
+                url, headers=search_settings.CR_API_HEADERS
+            ) as response:
+                response.raise_for_status()
+                return await response.json()
+        except aiohttp.ClientResponseError as e:
+            if e.status < 500 or attempt == search_settings.CR_API_RETRIES - 1:
+                raise
+            await asyncio.sleep(0.5 * (attempt + 1))
+
+
 async def search_clans_by_name(clan: str) -> dict:
     endpoint = search_settings.CR_API_CLAN_SEARCH.format(urllib.parse.quote(clan))
-
-    async with (
-        aiohttp.ClientSession() as session,
-        session.get(endpoint, headers=search_settings.CR_API_HEADERS) as response,
-    ):
-        response.raise_for_status()
-        return await response.json()
+    return await cr_api_get(endpoint)
 
 
 def parse_players(html: str) -> list[dict]:
@@ -108,18 +119,12 @@ def find_player_tag(players: list[dict], clan: str | None) -> str | None:
 
 async def get_battle_log(tag: str) -> list[dict]:
     url = search_settings.CR_API_BATTLE_LOG.format(urllib.parse.quote(tag))
-    async with aiohttp.ClientSession() as session:  # noqa: SIM117
-        async with session.get(url, headers=search_settings.CR_API_HEADERS) as response:
-            response.raise_for_status()
-            return await response.json()
+    return await cr_api_get(url)
 
 
 async def get_clan_members(clan_tag: str) -> dict:
     url = search_settings.CR_API_CLAN_MEMBERS.format(urllib.parse.quote(clan_tag))
-    async with aiohttp.ClientSession() as session:  # noqa: SIM117
-        async with session.get(url, headers=search_settings.CR_API_HEADERS) as response:
-            response.raise_for_status()
-            return await response.json()
+    return await cr_api_get(url)
 
 
 def find_member_in_clan(data: dict, name: str) -> str | None:
@@ -132,8 +137,22 @@ def find_member_in_clan(data: dict, name: str) -> str | None:
 
 async def search_player_in_clans(data: dict, name: str) -> str | None:
     clans = data["items"]
-    for clan in clans:
-        members = await get_clan_members(clan.get("tag"))
+    semaphore = asyncio.Semaphore(search_settings.CR_API_MAX_CONCURRENT)
+
+    async def get_members(clan_tag: str) -> dict:
+        async with semaphore:
+            try:
+                return await get_clan_members(clan_tag)
+            except aiohttp.ClientResponseError as e:
+                # Don't fail the whole search because of one clan
+                await log.warning(f"Skipping clan {clan_tag}: {e.status} {e.message}")
+                return {"items": []}
+
+    # Fetch all clans in parallel, but keep the original clan order when matching
+    all_members = await asyncio.gather(
+        *(get_members(clan.get("tag")) for clan in clans)
+    )
+    for members in all_members:
         member_tag = find_member_in_clan(members, name)
         if member_tag is not None:
             return member_tag

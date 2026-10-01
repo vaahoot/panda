@@ -1,4 +1,3 @@
-import io
 import time
 
 import aiohttp.client_exceptions
@@ -9,6 +8,7 @@ from discord.ext import commands
 
 import database
 import log
+import net
 from clash import claude, screenshots
 from clash.deck import generate_image
 from clash.scraping import flaresolverr, search
@@ -103,6 +103,7 @@ class Panda(commands.Bot):
 
     async def close(self) -> None:
         await flaresolverr.destroy_flaresolverr_session()
+        await net.close()
         if self.db.connection:
             await self.db.connection.close()
 
@@ -150,10 +151,7 @@ class Panda(commands.Bot):
                 return
 
             await log.info(f"Found deck for {name}: {[card['name'] for card in deck]}")
-            deck_image = await generate_image.build_deck_image(deck)
-            buffer = io.BytesIO()
-            deck_image.save(buffer, format="PNG")
-            buffer.seek(0)
+            buffer = await generate_image.build_deck_image(deck)
 
         await message.reply(
             f"Name: {name}\nClan: {clan}",
