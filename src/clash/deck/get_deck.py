@@ -1,13 +1,25 @@
+import asyncio
 import io
 
-import aiohttp
 from PIL import Image, UnidentifiedImageError
+
+import net
+
+# Card icons never change, so keep them for the lifetime of the bot
+_image_cache: dict[str, Image.Image] = {}
 
 
 async def fetch_image(url: str) -> Image.Image:
-    async with aiohttp.ClientSession() as session, session.get(url) as response:
+    if url in _image_cache:
+        return _image_cache[url]
+
+    async with net.session().get(url) as response:
         data = await response.read()
-        return Image.open(io.BytesIO(data))
+
+    img = Image.open(io.BytesIO(data))
+    img.load()
+    _image_cache[url] = img
+    return img
 
 
 async def get_last_deck(data: list[dict] | None) -> list[dict[str, str]] | None:
@@ -32,33 +44,33 @@ async def get_last_deck(data: list[dict] | None) -> list[dict[str, str]] | None:
     team = last_battle["team"][0]
     cards = team["cards"]
 
-    deck = []
-    for card in cards:
-        card_info = {}
+    return list(await asyncio.gather(*(get_card_info(card) for card in cards)))
 
-        card_info["name"] = card.get("name", "Unknown")
-        card_info["cost"] = card.get("elixirCost", 1.5)
 
-        card_icons = card["iconUrls"]
+async def get_card_info(card: dict) -> dict:
+    card_info = {}
 
-        if card.get("evolutionLevel") == 1:
-            key = "evolutionMedium"
-        elif card.get("evolutionLevel") == 2:
-            key = "heroMedium"
-        else:
-            key = "medium"
+    card_info["name"] = card.get("name", "Unknown")
+    card_info["cost"] = card.get("elixirCost", 1.5)
 
-        try:
-            card_info["img"] = await fetch_image(card_icons[key])
-        except UnidentifiedImageError:
-            if key != "medium":
-                try:
-                    card_info["img"] = await fetch_image(card_icons["medium"])
-                except UnidentifiedImageError:
-                    card_info["img"] = None
-            else:
+    card_icons = card["iconUrls"]
+
+    if card.get("evolutionLevel") == 1:
+        key = "evolutionMedium"
+    elif card.get("evolutionLevel") == 2:
+        key = "heroMedium"
+    else:
+        key = "medium"
+
+    try:
+        card_info["img"] = await fetch_image(card_icons[key])
+    except UnidentifiedImageError:
+        if key != "medium":
+            try:
+                card_info["img"] = await fetch_image(card_icons["medium"])
+            except UnidentifiedImageError:
                 card_info["img"] = None
+        else:
+            card_info["img"] = None
 
-        deck.append(card_info)
-
-    return deck
+    return card_info
