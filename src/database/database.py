@@ -15,6 +15,8 @@ class Database:
 
     async def connect(self) -> None:
         self.connection = await aiosqlite.connect(self.path)
+        # SQLite ignores ON DELETE CASCADE unless this is enabled per connection
+        await self.connection.execute("PRAGMA foreign_keys = ON")
 
         async with aiofiles.open(self.schema) as f:
             schema_setup = await f.read()
