@@ -88,7 +88,7 @@ class Panda(commands.Bot):
         channel = message.channel
         attachments = message.attachments
 
-        if (attachments is not None) and (
+        if attachments and (
             guild is None or await self.db.is_image_channel(guild, channel)  # type: ignore
         ):
             await self.search_by_screenshot(message)
