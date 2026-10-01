@@ -40,7 +40,7 @@ class Search(commands.Cog, name="🔎 Search"):
 
         await self.bot.search_by_info(name, clan, ctx.message)
 
-    @commands.cooldown(rate=1, per=180, type=commands.BucketType.user)
+    # Cooldown is applied in Panda.search_by_screenshot, shared with screenshot channels
     @commands.command(aliases=["ss"], brief="Find a deck by screenshot")
     async def screenshot(self, ctx: commands.Context):
         """Searches an opponent's deck by a screenshot of the match.

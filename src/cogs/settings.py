@@ -3,6 +3,9 @@ from discord.ext import commands
 
 import core
 
+# Only checked when changing a setting, viewing doesn't need permissions
+can_manage_guild = commands.has_guild_permissions(manage_guild=True).predicate
+
 
 class Settings(commands.Cog, name="⚙️ Settings"):
     """Change preferences for this bot."""
@@ -38,6 +41,8 @@ class Settings(commands.Cog, name="⚙️ Settings"):
 
             return
 
+        await can_manage_guild(ctx)
+
         if state.lower() == "on":
             add = await self.bot.db.add_image_channel(guild, channel)
             if add:
@@ -68,6 +73,8 @@ class Settings(commands.Cog, name="⚙️ Settings"):
             current_prefix = await self.bot.db.get_prefix(guild)
             await ctx.send(f"The current prefix is `{current_prefix}`.")
             return
+
+        await can_manage_guild(ctx)
 
         await self.bot.db.set_prefix(guild, prefix)
         self.bot.prefix_cache.pop(guild.id)

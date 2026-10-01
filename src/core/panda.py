@@ -31,6 +31,11 @@ class Panda(commands.Bot):
         self.claude_client = claude_client
         self.template_gray, self.mask = screenshots.load_template(paths.SHIELD_TEMPLATE)
 
+        # Shared between !screenshot, screenshot channels and DMs
+        self.screenshot_cooldown = commands.CooldownMapping.from_cooldown(
+            1, settings.SCREENSHOT_COOLDOWN, commands.BucketType.user
+        )
+
     async def __get_prefix(
         self, bot: commands.Bot, message: discord.Message
     ) -> list | str:
@@ -115,7 +120,9 @@ class Panda(commands.Bot):
 
         error_message = str(error).replace("'", "`")
 
-        if isinstance(error, commands.errors.NoPrivateMessage):
+        if isinstance(
+            error, (commands.errors.NoPrivateMessage, commands.errors.MissingPermissions)
+        ):
             await ctx.reply(error_message)
         elif isinstance(error, commands.errors.CommandOnCooldown):
             await ctx.reply(f"Slow down! Try again in {error.retry_after:.0f} seconds")
@@ -173,6 +180,12 @@ class Panda(commands.Bot):
 
         if not attachments[0].content_type.startswith("image/"):  # type: ignore
             await message.reply("Attachment must be an image")
+            return
+
+        bucket = self.screenshot_cooldown.get_bucket(message)
+        retry_after = bucket.update_rate_limit() if bucket else None
+        if retry_after:
+            await message.reply(f"Slow down! Try again in {retry_after:.0f} seconds")
             return
 
         async with channel.typing():
