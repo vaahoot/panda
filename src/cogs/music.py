@@ -162,7 +162,7 @@ class Music(commands.Cog, name="🎶 Music"):
             embed.title = "Auto queue"
             queue = player.auto_queue
 
-        if len(queue) <= 0:
+        if len(queue) <= 0 and player.current is None:
             embed.title = ""
             embed.description = "Nothing in the queue"
             await ctx.send(embed=embed)
