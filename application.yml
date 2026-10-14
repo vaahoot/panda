@@ -52,6 +52,7 @@ plugins:
       - TV
       - WEB
       - WEBEMBEDDED
+      - ANDROID_VR
 
   lavasrc:
     providers:
