@@ -88,3 +88,83 @@ class Database:
         )
         row = await cursor.fetchone()
         return row is not None
+
+    async def create_playlist(self, user: discord.abc.User, name: str) -> bool:
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "INSERT OR IGNORE INTO playlist(user_id, name) VALUES(?, ?)",
+            (user.id, name),
+        )
+        await self.connection.commit()
+        return cursor.rowcount > 0
+
+    async def get_playlists(self, user: discord.abc.User) -> list[str]:
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "SELECT name \
+            FROM playlist \
+            WHERE user_id = ? \
+            ORDER BY name",
+            (user.id,),
+        )
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+
+    async def get_playlist_id(self, user: discord.abc.User, name: str) -> int | None:
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "SELECT playlist_id \
+            FROM playlist \
+            WHERE user_id = ? AND name = ?",
+            (user.id, name),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def add_playlist_tracks(
+        self, playlist_id: int, tracks: list[tuple[str, str, str]]
+    ) -> None:
+        """tracks is a list of (url, title, author)."""
+        assert self.connection is not None
+        await self.connection.executemany(
+            "INSERT INTO playlist_track(playlist_id, url, title, author) VALUES(?, ?, ?, ?)",
+            [(playlist_id, *track) for track in tracks],
+        )
+        await self.connection.commit()
+
+    async def get_playlist_urls(self, playlist_id: int) -> list[str]:
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "SELECT url \
+            FROM playlist_track \
+            WHERE playlist_id = ? \
+            ORDER BY track_id",
+            (playlist_id,),
+        )
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+
+    async def get_playlist_summaries(self, user: discord.abc.User) -> list[tuple[str, int]]:
+        """Returns (name, track count) for each of the user's playlists."""
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "SELECT p.name, COUNT(t.track_id) \
+            FROM playlist p \
+            LEFT JOIN playlist_track t ON t.playlist_id = p.playlist_id \
+            WHERE p.user_id = ? \
+            GROUP BY p.playlist_id \
+            ORDER BY p.name",
+            (user.id,),
+        )
+        rows = await cursor.fetchall()
+        return [(row[0], row[1]) for row in rows]
+
+    async def delete_playlist(self, user: discord.abc.User, name: str) -> bool:
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "DELETE FROM playlist \
+            WHERE user_id = ? AND name = ?",
+            (user.id, name),
+        )
+        await self.connection.commit()
+        return cursor.rowcount > 0

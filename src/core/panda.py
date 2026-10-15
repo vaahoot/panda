@@ -124,6 +124,13 @@ class Panda(commands.Bot):
             error, (commands.errors.NoPrivateMessage, commands.errors.MissingPermissions)
         ):
             await ctx.reply(error_message)
+        elif isinstance(error, commands.errors.MissingRequiredArgument):
+            embed = discord.Embed(
+                description=f"Missing argument `{error.param.name}`. "
+                f"Usage: `{ctx.clean_prefix}{ctx.command} {ctx.command.signature if ctx.command else ''}`",
+                color=settings.ERROR_COLOR,
+            )
+            await ctx.reply(embed=embed)
         elif isinstance(error, commands.errors.CommandOnCooldown):
             await ctx.reply(f"Slow down! Try again in {error.retry_after:.0f} seconds")
         elif isinstance(
