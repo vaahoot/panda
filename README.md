@@ -62,6 +62,15 @@ docker compose exec bot python3 src/crawl_players.py --max-players 1000000
 
 Run it with `exec` inside the bot container so both share the same SQLite file and journal. Use `--rps` to change the request rate (default 15/s) and `--help` for the other options.
 
+By default the crawler uses the same key and RoyaleAPI proxy as the bot. On a server with a fixed IP it can call the official API directly with its own key, created for that IP at developer.clashroyale.com. Add these to `.env`:
+
+```bash
+CR_CRAWLER_API_KEY="key_allowed_for_your_server_ip"
+CR_CRAWLER_API_BASE="https://api.clashroyale.com/v1"
+```
+
+The bot's own searches keep using `CR_API_KEY` through the proxy.
+
 To keep everyone's clan up to date, re-crawl clans that haven't been checked in a while. Each clan request updates all of its members' names and clans and clears players who left, and the run stops once every clan is fresh:
 
 ```bash

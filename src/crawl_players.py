@@ -79,7 +79,7 @@ class Api:
 
     async def get(self, path: str, **params) -> dict | list | None:
         """Returns the JSON body, or None if the resource doesn't exist."""
-        url = search_settings.CR_API_BASE + path
+        url = search_settings.CR_CRAWLER_API_BASE + path
         params = {k: v for k, v in params.items() if v is not None}
 
         for attempt in range(MAX_RETRIES):
@@ -94,7 +94,7 @@ class Api:
                     async with net.session().get(
                         url,
                         params=params,
-                        headers=search_settings.CR_API_HEADERS,
+                        headers=search_settings.CR_CRAWLER_API_HEADERS,
                         timeout=aiohttp.ClientTimeout(total=30),
                     ) as response:
                         if response.status == 200:
@@ -103,7 +103,7 @@ class Api:
                             return None
                         if response.status == 403:
                             body = await response.text()
-                            raise FatalApiError(f"403 from API, check CR_API_KEY / allowed IPs: {body}")
+                            raise FatalApiError(f"403 from {search_settings.CR_CRAWLER_API_BASE}, check the API key and its allowed IPs: {body}")
                         status = response.status
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     status = f"{type(e).__name__}"
@@ -368,6 +368,7 @@ async def main() -> None:
     db = database.connection
     assert db is not None
     api = Api(args.rps, args.concurrency)
+    await log.info(f"Sending API requests to {search_settings.CR_CRAWLER_API_BASE}")
 
     # Ctrl+C, `docker stop` and a closed terminal all stop gracefully instead of losing the batch
     loop = asyncio.get_running_loop()
