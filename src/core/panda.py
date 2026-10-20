@@ -110,11 +110,17 @@ class Panda(commands.Bot):
         await log.info(f"Left guild {guild.name}, id: {guild.id}")
         await self.db.remove_guild(guild)
 
-    async def start_flaresolverr(self) -> None:
-        try:
-            await flaresolverr.create_flaresolverr_session()
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            await log.warning(f"Couldn't start a FlareSolverr session, RoyaleAPI name search won't work: {e}")
+    async def start_flaresolverr(self, attempts: int = 12, delay: float = 10) -> None:
+        # FlareSolverr starts alongside the bot and takes a while to accept connections
+        for attempt in range(1, attempts + 1):
+            try:
+                await flaresolverr.create_flaresolverr_session()
+                return
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                if attempt == attempts:
+                    await log.warning(f"Couldn't start a FlareSolverr session, RoyaleAPI name search won't work: {e}")
+                    return
+                await asyncio.sleep(delay)
 
     async def close(self) -> None:
         if self.flaresolverr_task and not self.flaresolverr_task.done():

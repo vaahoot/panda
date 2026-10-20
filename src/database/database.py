@@ -38,6 +38,7 @@ class Database:
         self.connection: aiosqlite.Connection | None = None
 
     async def connect(self) -> None:
+        pathlib.Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self.connection = await aiosqlite.connect(self.path)
         # SQLite ignores ON DELETE CASCADE unless this is enabled per connection
         await self.connection.execute("PRAGMA foreign_keys = ON")
