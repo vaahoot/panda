@@ -14,6 +14,8 @@ Usage (from the repo root, or inside the bot container with `docker compose exec
 
 import argparse
 import asyncio
+import os
+import signal
 import time
 import urllib.parse
 
@@ -40,6 +42,10 @@ class FatalApiError(Exception):
     pass
 
 
+class Stopping(Exception):
+    """Raised instead of sending a request once a stop was requested."""
+
+
 class Api:
     """CR API client with a global request rate limit and retries."""
 
@@ -50,6 +56,15 @@ class Api:
         self.semaphore = asyncio.Semaphore(concurrency)
         self.requests = 0
         self.started = time.monotonic()
+        self.stopping = False
+
+    def stop(self) -> None:
+        """First signal: finish in-flight requests, save, exit. Second signal: exit right away."""
+        if self.stopping:
+            print("Forced exit, the current batch is lost")
+            os._exit(1)
+        self.stopping = True
+        print("Stopping: saving finished work, press Ctrl+C again to exit immediately")
 
     async def wait_for_slot(self) -> None:
         async with self.lock:
@@ -68,7 +83,11 @@ class Api:
         params = {k: v for k, v in params.items() if v is not None}
 
         for attempt in range(MAX_RETRIES):
+            if self.stopping:
+                raise Stopping()
             await self.wait_for_slot()
+            if self.stopping:
+                raise Stopping()
             async with self.semaphore:
                 self.requests += 1
                 try:
@@ -97,7 +116,10 @@ class Api:
                     self.next_slot = max(self.next_slot, time.monotonic() + backoff)
             elif status == 503:
                 await log.warning("API in maintenance, waiting 60s")
-                await asyncio.sleep(60)
+                for _ in range(60):
+                    if self.stopping:
+                        raise Stopping()
+                    await asyncio.sleep(1)
             else:
                 await asyncio.sleep(0.5 * (attempt + 1))
 
@@ -163,7 +185,11 @@ async def seed(api: Api, db: aiosqlite.Connection, seed_pages: int, max_players:
 
     total_clans = total_players = 0
     for done, result in enumerate(asyncio.as_completed([seed_one(loc) for loc in items]), 1):
-        clans, players = await result
+        try:
+            clans, players = await result
+        except Stopping:
+            # Locations that finished before the stop are already saved
+            continue
         await db.executemany(UPSERT_CLAN, clans)
         await db.executemany(UPSERT_PLAYER, players)
         await db.commit()
@@ -178,6 +204,9 @@ async def seed(api: Api, db: aiosqlite.Connection, seed_pages: int, max_players:
         if max_players and await count(db, "SELECT COUNT(*) FROM cr_player") >= max_players:
             await log.info(f"Seeded {done}/{len(items)} locations, player limit reached")
             return
+
+    if api.stopping:
+        await log.info("Stopped during seeding, run with --reseed to seed the remaining locations")
 
 
 async def crawl_clan(api: Api, tag: str) -> tuple[list, list]:
@@ -233,9 +262,11 @@ async def crawl(api: Api, db: aiosqlite.Connection, max_players: int, max_reques
         clan_tags = [row[0] for row in await cursor.fetchall()]
 
         if clan_tags:
-            results = await asyncio.gather(*(crawl_clan(api, tag) for tag in clan_tags))
+            results = await asyncio.gather(
+                *(crawl_clan(api, tag) for tag in clan_tags), return_exceptions=True
+            )
             mark_done = "UPDATE cr_clan SET members_checked_at = ? WHERE tag = ?"
-            done_tags = clan_tags
+            tags = clan_tags
         else:
             cursor = await db.execute(
                 "SELECT tag FROM cr_player WHERE battlelog_checked_at IS NULL LIMIT ?",
@@ -245,9 +276,17 @@ async def crawl(api: Api, db: aiosqlite.Connection, max_players: int, max_reques
             if not player_tags:
                 await log.info("Nothing left to crawl")
                 return
-            results = await asyncio.gather(*(crawl_battlelog(api, tag) for tag in player_tags))
+            results = await asyncio.gather(
+                *(crawl_battlelog(api, tag) for tag in player_tags), return_exceptions=True
+            )
             mark_done = "UPDATE cr_player SET battlelog_checked_at = ? WHERE tag = ?"
-            done_tags = player_tags
+            tags = player_tags
+
+        # Only save what finished: tags skipped by a stop (or an error) stay pending for the next run
+        finished = [(tag, result) for tag, result in zip(tags, results) if not isinstance(result, BaseException)]
+        errors = [result for result in results if isinstance(result, BaseException) and not isinstance(result, Stopping)]
+        done_tags = [tag for tag, _ in finished]
+        results = [result for _, result in finished]
 
         # Write the whole batch in one short transaction so the bot is never blocked for long
         now = int(time.time())
@@ -262,6 +301,12 @@ async def crawl(api: Api, db: aiosqlite.Connection, max_players: int, max_reques
             f"Players: {total_players} | clans to crawl: {pending_clans} | "
             f"requests: {api.requests} ({api.rate():.1f}/s)"
         )
+
+        if errors:
+            raise errors[0]
+        if api.stopping:
+            await log.info(f"Stopped, saved {len(done_tags)} of {len(tags)} in the last batch")
+            return
 
 
 async def main() -> None:
@@ -281,10 +326,16 @@ async def main() -> None:
     assert db is not None
     api = Api(args.rps, args.concurrency)
 
+    # Ctrl+C, `docker stop` and a closed terminal all stop gracefully instead of losing the batch
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        loop.add_signal_handler(sig, api.stop)
+
     try:
         if args.reseed or await count(db, "SELECT COUNT(*) FROM cr_clan") == 0:
             await seed(api, db, args.seed_pages, args.max_players)
-        await crawl(api, db, args.max_players, args.max_requests)
+        if not api.stopping:
+            await crawl(api, db, args.max_players, args.max_requests)
     finally:
         await db.close()
         await net.close()
