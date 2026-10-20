@@ -62,6 +62,12 @@ docker compose exec bot python3 src/crawl_players.py --max-players 1000000
 
 Run it with `exec` inside the bot container so both share the same SQLite file and journal. Use `--rps` to change the request rate (default 15/s) and `--help` for the other options.
 
+Player names are searched by a normalised key (`normalise()` in `src/clash/scraping/search.py`). After changing that function, stop the crawler and recompute the stored keys:
+
+```bash
+docker compose exec bot python3 src/renormalise_players.py
+```
+
 ## Limitations
 ```
 1. The search is not guaranteed to work if the player has a very common name and no clan or their clan has a common name too.
