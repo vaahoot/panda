@@ -24,18 +24,14 @@ import aiosqlite
 
 import log
 import net
-from clash.scraping.search import normalise
+from clash.names import normalise
 from config import paths, search_settings
 from database import Database
-from database.database import UPSERT_PLAYER
+from database.database import UPSERT_CLAN, UPSERT_PLAYER
 
 BATCH_SIZE = 500
 MAX_RETRIES = 5
 
-UPSERT_CLAN = """
-    INSERT INTO cr_clan(tag, name) VALUES(?, ?)
-    ON CONFLICT(tag) DO UPDATE SET name = excluded.name
-"""
 
 
 class FatalApiError(Exception):
@@ -44,6 +40,10 @@ class FatalApiError(Exception):
 
 class Stopping(Exception):
     """Raised instead of sending a request once a stop was requested."""
+
+
+class RequestFailed(Exception):
+    """Raised when a request still fails after all retries, unlike a 404 which returns None."""
 
 
 class Api:
@@ -124,11 +124,16 @@ class Api:
                 await asyncio.sleep(0.5 * (attempt + 1))
 
         await log.warning(f"Giving up on {path} after {MAX_RETRIES} attempts (last: {status})")
-        return None
+        raise RequestFailed(path)
 
 
-def player_row(tag: str, name: str, clan_name: str | None) -> tuple:
-    return (tag, name, clan_name, normalise(name))
+def clan_row(clan: dict) -> tuple:
+    return (clan["tag"], clan["name"], normalise(clan["name"]))
+
+
+def player_row(tag: str, name: str, clan: dict | None) -> tuple:
+    clan = clan or {}
+    return (tag, name, clan.get("tag"), clan.get("name"), normalise(name))
 
 
 def quote(tag: str) -> str:
@@ -142,14 +147,14 @@ async def seed_location(api: Api, location: dict, seed_pages: int) -> tuple[list
 
     rankings = await api.get(f"/locations/{location_id}/rankings/clans")
     for clan in (rankings or {}).get("items", []):
-        clans.append((clan["tag"], clan["name"]))
+        clans.append(clan_row(clan))
 
     path_of_legend = await api.get(f"/locations/{location_id}/pathoflegend/players")
     for player in (path_of_legend or {}).get("items", []):
         clan = player.get("clan") or {}
-        players.append(player_row(player["tag"], player["name"], clan.get("name")))
+        players.append(player_row(player["tag"], player["name"], clan))
         if clan.get("tag"):
-            clans.append((clan["tag"], clan["name"]))
+            clans.append(clan_row(clan))
 
     # Clan search needs at least one filter, locationId + minMembers skips empty clans
     after = None
@@ -160,7 +165,7 @@ async def seed_location(api: Api, location: dict, seed_pages: int) -> tuple[list
         if not page:
             break
         for clan in page.get("items", []):
-            clans.append((clan["tag"], clan["name"]))
+            clans.append(clan_row(clan))
         after = page.get("paging", {}).get("cursors", {}).get("after")
         if not after:
             break
@@ -187,7 +192,7 @@ async def seed(api: Api, db: aiosqlite.Connection, seed_pages: int, max_players:
     for done, result in enumerate(asyncio.as_completed([seed_one(loc) for loc in items]), 1):
         try:
             clans, players = await result
-        except Stopping:
+        except (Stopping, RequestFailed):
             # Locations that finished before the stop are already saved
             continue
         await db.executemany(UPSERT_CLAN, clans)
@@ -209,21 +214,20 @@ async def seed(api: Api, db: aiosqlite.Connection, seed_pages: int, max_players:
         await log.info("Stopped during seeding, run with --reseed to seed the remaining locations")
 
 
-async def crawl_clan(api: Api, tag: str) -> tuple[list, list]:
-    """Returns (clan rows, player rows) from the clan's member list."""
+async def crawl_clan(api: Api, tag: str) -> tuple[list, list, tuple[str, list[str]]]:
+    """Returns (clan rows, player rows, (clan tag, current member tags)) from the clan's member list."""
     clan = await api.get(f"/clans/{quote(tag)}")
     if not clan:
-        return [], []
+        # Deleted clan: nobody is in it any more
+        return [], [], (tag, [])
 
-    players = [
-        player_row(member["tag"], member["name"], clan["name"])
-        for member in clan.get("memberList", [])
-    ]
-    return [(clan["tag"], clan["name"])], players
+    members = clan.get("memberList", [])
+    players = [player_row(member["tag"], member["name"], clan) for member in members]
+    return [clan_row(clan)], players, (tag, [member["tag"] for member in members])
 
 
-async def crawl_battlelog(api: Api, tag: str) -> tuple[list, list]:
-    """Returns (clan rows, player rows) for everyone in the player's recent battles."""
+async def crawl_battlelog(api: Api, tag: str) -> tuple[list, list, None]:
+    """Returns (clan rows, player rows, None) for everyone in the player's recent battles."""
     battles = await api.get(f"/players/{quote(tag)}/battlelog")
     clans, players = [], []
 
@@ -232,11 +236,11 @@ async def crawl_battlelog(api: Api, tag: str) -> tuple[list, list]:
             if not participant.get("tag") or not participant.get("name"):
                 continue
             clan = participant.get("clan") or {}
-            players.append(player_row(participant["tag"], participant["name"], clan.get("name")))
+            players.append(player_row(participant["tag"], participant["name"], clan))
             if clan.get("tag"):
-                clans.append((clan["tag"], clan["name"]))
+                clans.append(clan_row(clan))
 
-    return clans, players
+    return clans, players, None
 
 
 async def count(db: aiosqlite.Connection, query: str) -> int:
@@ -245,7 +249,22 @@ async def count(db: aiosqlite.Connection, query: str) -> int:
     return row[0] if row else 0
 
 
-async def crawl(api: Api, db: aiosqlite.Connection, max_players: int, max_requests: int) -> None:
+async def clear_leavers(db: aiosqlite.Connection, clan_tag: str, member_tags: list[str]) -> None:
+    """Players stored in the clan but not in its current member list have left it."""
+    placeholders = ",".join("?" * len(member_tags))
+    query = "UPDATE cr_player SET clan_tag = NULL, clan_name = NULL WHERE clan_tag = ?"
+    if member_tags:
+        query += f" AND tag NOT IN ({placeholders})"
+    await db.execute(query, (clan_tag, *member_tags))
+    if not member_tags:
+        await db.execute("DELETE FROM cr_clan WHERE tag = ?", (clan_tag,))
+
+
+async def crawl(
+    api: Api, db: aiosqlite.Connection, max_players: int, max_requests: int, refresh_days: float
+) -> None:
+    refresh_before = int(time.time() - refresh_days * 86400) if refresh_days else None
+
     while True:
         total_players = await count(db, "SELECT COUNT(*) FROM cr_player")
         if max_players and total_players >= max_players:
@@ -260,6 +279,17 @@ async def crawl(api: Api, db: aiosqlite.Connection, max_players: int, max_reques
             "SELECT tag FROM cr_clan WHERE members_checked_at IS NULL LIMIT ?", (BATCH_SIZE,)
         )
         clan_tags = [row[0] for row in await cursor.fetchall()]
+
+        if not clan_tags and refresh_before:
+            # Then clans not checked within --refresh-days, oldest first
+            cursor = await db.execute(
+                "SELECT tag FROM cr_clan WHERE members_checked_at < ? ORDER BY members_checked_at LIMIT ?",
+                (refresh_before, BATCH_SIZE),
+            )
+            clan_tags = [row[0] for row in await cursor.fetchall()]
+            if not clan_tags:
+                await log.info(f"Refresh done, every clan was checked in the last {refresh_days:g} days")
+                return
 
         if clan_tags:
             results = await asyncio.gather(
@@ -282,9 +312,10 @@ async def crawl(api: Api, db: aiosqlite.Connection, max_players: int, max_reques
             mark_done = "UPDATE cr_player SET battlelog_checked_at = ? WHERE tag = ?"
             tags = player_tags
 
-        # Only save what finished: tags skipped by a stop (or an error) stay pending for the next run
+        # Only save what finished: tags skipped by a stop or a failed request stay pending for the next run
+        skippable = (Stopping, RequestFailed)
         finished = [(tag, result) for tag, result in zip(tags, results) if not isinstance(result, BaseException)]
-        errors = [result for result in results if isinstance(result, BaseException) and not isinstance(result, Stopping)]
+        errors = [result for result in results if isinstance(result, BaseException) and not isinstance(result, skippable)]
         done_tags = [tag for tag, _ in finished]
         results = [result for _, result in finished]
 
@@ -292,15 +323,22 @@ async def crawl(api: Api, db: aiosqlite.Connection, max_players: int, max_reques
         now = int(time.time())
         await db.executemany(UPSERT_CLAN, [clan for result in results for clan in result[0]])
         await db.executemany(UPSERT_PLAYER, [player for result in results for player in result[1]])
+        # After the upserts, so players who moved between two clans in this batch keep their new clan
+        for result in results:
+            if result[2] is not None:
+                await clear_leavers(db, *result[2])
         await db.executemany(mark_done, [(now, tag) for tag in done_tags])
         await db.commit()
 
         total_players = await count(db, "SELECT COUNT(*) FROM cr_player")
         pending_clans = await count(db, "SELECT COUNT(*) FROM cr_clan WHERE members_checked_at IS NULL")
-        await log.info(
-            f"Players: {total_players} | clans to crawl: {pending_clans} | "
-            f"requests: {api.requests} ({api.rate():.1f}/s)"
-        )
+        status = f"Players: {total_players} | clans to crawl: {pending_clans}"
+        if refresh_before:
+            cursor = await db.execute(
+                "SELECT COUNT(*) FROM cr_clan WHERE members_checked_at < ?", (refresh_before,)
+            )
+            status += f" | clans to refresh: {(await cursor.fetchone())[0]}"
+        await log.info(f"{status} | requests: {api.requests} ({api.rate():.1f}/s)")
 
         if errors:
             raise errors[0]
@@ -318,6 +356,11 @@ async def main() -> None:
     parser.add_argument("--max-requests", type=int, default=0, help="stop after roughly this many requests")
     parser.add_argument("--seed-pages", type=int, default=10, help="clan search pages (100 clans each) per location")
     parser.add_argument("--reseed", action="store_true", help="seed again even if clans are already stored")
+    parser.add_argument(
+        "--refresh-days", type=float, default=0,
+        help="also re-crawl clans not checked in this many days (updates names/clans, clears leavers), "
+        "then stop instead of moving on to battle logs",
+    )
     args = parser.parse_args()
 
     database = Database(args.db, paths.SCHEMA)
@@ -335,7 +378,7 @@ async def main() -> None:
         if args.reseed or await count(db, "SELECT COUNT(*) FROM cr_clan") == 0:
             await seed(api, db, args.seed_pages, args.max_players)
         if not api.stopping:
-            await crawl(api, db, args.max_players, args.max_requests)
+            await crawl(api, db, args.max_players, args.max_requests, args.refresh_days)
     finally:
         await db.close()
         await net.close()

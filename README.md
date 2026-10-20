@@ -62,6 +62,24 @@ docker compose exec bot python3 src/crawl_players.py --max-players 1000000
 
 Run it with `exec` inside the bot container so both share the same SQLite file and journal. Use `--rps` to change the request rate (default 15/s) and `--help` for the other options.
 
+To keep everyone's clan up to date, re-crawl clans that haven't been checked in a while. Each clan request updates all of its members' names and clans and clears players who left, and the run stops once every clan is fresh:
+
+```bash
+docker compose exec bot python3 src/crawl_players.py --refresh-days 7
+```
+
+Databases crawled before players had a `clan_tag` can fill most of them from clan names that only one stored clan uses:
+
+```bash
+docker compose exec bot python3 src/backfill_clan_tags.py
+```
+
+Name search uses an FTS5 trigram index (`cr_player_fts`), kept in sync by triggers. The bot builds it the first time it connects to a database that doesn't have it yet (about 5 minutes for 10M players). If the database is ever `VACUUM`ed, rebuild it:
+
+```bash
+sqlite3 bot.db "INSERT INTO cr_player_fts(cr_player_fts) VALUES('rebuild')"
+```
+
 Player names are searched by a normalised key (`normalise()` in `src/clash/scraping/search.py`). After changing that function, stop the crawler and recompute the stored keys:
 
 ```bash

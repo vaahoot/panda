@@ -1,5 +1,4 @@
 import asyncio
-import unicodedata
 import urllib.parse
 
 import aiohttp
@@ -8,52 +7,11 @@ import bs4
 import log
 import net
 from clash.deck import get_deck
+from clash.names import normalise
 from config import search_settings
 from database import Database
 
 from . import flaresolverr
-
-
-# Accents and overlays (strikethrough, slashes, underlines) people decorate names with.
-# Other scripts' combining marks (Japanese voicing, Thai vowels) are part of the letter, so they stay
-DECORATION_RANGES = (
-    (0x0300, 0x036F),  # Combining Diacritical Marks
-    (0x1AB0, 0x1AFF),  # Combining Diacritical Marks Extended
-    (0x1DC0, 0x1DFF),  # Combining Diacritical Marks Supplement
-    (0x20D0, 0x20FF),  # Combining Diacritical Marks for Symbols
-    (0xFE20, 0xFE2F),  # Combining Half Marks
-)
-
-
-# Letters that look like an accented Latin letter but don't decompose into one
-LOOKALIKES = str.maketrans({
-    "đ": "d", "ð": "d", "ø": "o", "ł": "l", "ħ": "h", "ŧ": "t", "ı": "i",
-    "ß": "ss", "æ": "ae", "œ": "oe", "þ": "th",
-})
-
-
-def is_decoration(c: str) -> bool:
-    return any(lo <= ord(c) <= hi for lo, hi in DECORATION_RANGES)
-
-
-def normalise(text: str) -> str:
-    """Search key for player and clan names, use it on both sides of every comparison.
-
-    Lowercase, accents and decorative marks removed (so "T̶B̶ J̸O̸H̸A̸N̸" and "Édy" become
-    "tbjohan" and "edy"), and only letters and digits kept, so spaces, symbols and emoji
-    don't matter. Works the same for any script.
-    """
-    lowered = unicodedata.normalize("NFKC", text).lower()
-    key = "".join(
-        c for c in unicodedata.normalize("NFKD", lowered).translate(LOOKALIKES)
-        if not is_decoration(c) and (c.isalnum() or unicodedata.category(c) in ("Mn", "Mc"))
-    )
-    # Back to composed form: rejoins Korean syllables and Japanese voiced kana split by NFKD
-    key = unicodedata.normalize("NFC", key)
-    if key:
-        return key
-    # Names made only of symbols/emoji would otherwise match everything
-    return lowered.strip()
 
 
 async def search(link: str, selector: str) -> str:
@@ -127,19 +85,6 @@ def parse_players(html: str) -> list[dict]:
     return players
 
 
-# Not used anymore, will delete if searching clans using official API doesn't work out well.
-def parse_clans(html: str) -> list[str]:
-    soup = bs4.BeautifulSoup(html, "html.parser")
-    results = soup.find_all("div", class_="clanresult")
-
-    clans = []
-    for result in results:
-        clan_tag = "%23" + str(result["data-clantag"])
-        clans.append(clan_tag)
-
-    return clans
-
-
 def find_player_tag(players: list[dict], clan: str | None) -> str | None:
     if len(players) == 1:
         return players[0]["tag"]
@@ -202,22 +147,34 @@ async def search_player_in_clans(data: dict, name: str) -> str | None:
 
 
 DB_SEARCH_LIMIT = 1000
+DB_CLAN_MEMBERS_LIMIT = 5000
 
 
-def pick_stored_player(rows: list[tuple[str, str | None]], clan: str | None) -> str | None:
-    """Picks the tag from stored (tag, clan name) rows, None if there's no single clear match."""
-    if not clan:
-        if len(rows) == 1:
-            return rows[0][0]
-        clanless = [tag for tag, clan_name in rows if not clan_name]
-        return clanless[0] if len(clanless) == 1 else None
+def pick_clanless(rows: list[tuple[str, str | None]]) -> str | None:
+    """With no clan given: the only player, or the only one without a clan."""
+    if len(rows) == 1:
+        return rows[0][0]
+    clanless = [tag for tag, clan_name in rows if not clan_name]
+    return clanless[0] if len(clanless) == 1 else None
 
-    clan = normalise(clan)
-    exact = [tag for tag, clan_name in rows if clan_name and normalise(clan_name) == clan]
-    if len(exact) == 1:
-        return exact[0]
-    partial = [tag for tag, clan_name in rows if clan_name and clan in normalise(clan_name)]
-    return partial[0] if len(partial) == 1 else None
+
+# Closest first. Names cut off in a screenshot lose their end, so "starts with" beats "contains"
+MATCH_LEVELS = (str.__eq__, str.startswith, str.__contains__)
+
+
+def pick_by_name_and_clan(candidates: dict[str, tuple[str, str]], name: str, clan: str) -> str | None:
+    """candidates maps tag -> (player key, clan key). Tries the closest matches first: same clan
+    and same name, then looser ones. The first level with any match decides: one player is the
+    answer, several means the database can't tell them apart."""
+    for clan_matches in MATCH_LEVELS:
+        for name_matches in MATCH_LEVELS:
+            tags = [
+                tag for tag, (player_key, clan_key) in candidates.items()
+                if clan_key and clan_matches(clan_key, clan) and name_matches(player_key, name)
+            ]
+            if tags:
+                return tags[0] if len(tags) == 1 else None
+    return None
 
 
 async def find_tag_in_database(db: Database, name: str, clan: str | None) -> str | None:
@@ -225,16 +182,37 @@ async def find_tag_in_database(db: Database, name: str, clan: str | None) -> str
     if not name:
         # An empty key is a substring of every name
         return None
-    rows = await db.get_players_by_name(name, DB_SEARCH_LIMIT)
 
-    # Prefer players whose whole name matches, then any name containing it
-    exact = [(tag, clan_name) for tag, clan_name, search_name in rows if search_name == name]
-    tag = pick_stored_player(exact, clan)
-    if tag or len(rows) >= DB_SEARCH_LIMIT:
-        # A capped result may be missing the right player, so a "unique" substring match isn't trustworthy
-        return tag
+    # The name alone is enough when only one stored player has it
+    exact = await db.get_players_by_exact_name(name, DB_SEARCH_LIMIT)
+    if len(exact) == 1:
+        return exact[0][0]
+    containing = await db.get_players_by_name(name, DB_SEARCH_LIMIT)
+    if not exact and len(containing) == 1:
+        return containing[0][0]
 
-    return pick_stored_player([(tag, clan_name) for tag, clan_name, _ in rows], clan)
+    clan = normalise(clan) if clan else ""
+    if not clan:
+        if exact:
+            return pick_clanless([(tag, clan_name) for tag, clan_name, _ in exact])
+        if len(containing) >= DB_SEARCH_LIMIT:
+            # A capped result may be missing the right player
+            return None
+        return pick_clanless([(tag, clan_name) for tag, clan_name, _ in containing])
+
+    # Players matching the name, plus members of clans matching the clan. The second half
+    # still finds common names whose matches didn't all fit in the name results
+    candidates = {
+        tag: (search_name, normalise(clan_name) if clan_name else "")
+        for tag, clan_name, search_name in exact + containing
+    }
+    members = await db.get_players_in_clans(clan, partial=False, limit=DB_CLAN_MEMBERS_LIMIT)
+    if not members:
+        members = await db.get_players_in_clans(clan, partial=True, limit=DB_CLAN_MEMBERS_LIMIT)
+    for tag, search_name, clan_key in members:
+        candidates[tag] = (search_name, clan_key)
+
+    return pick_by_name_and_clan(candidates, name, clan)
 
 
 async def find_tag_by_name(name: str, clan: str | None) -> str | None:
@@ -274,9 +252,9 @@ async def save_player_from_battle_log(db: Database, tag: str, battles: list[dict
         for participant in battle.get("team", []):
             if participant.get("tag", "").lstrip("#").upper() != wanted or not participant.get("name"):
                 continue
-            clan_name = (participant.get("clan") or {}).get("name")
+            clan = participant.get("clan") or {}
             name = participant["name"]
-            await db.save_player(participant["tag"], name, clan_name, normalise(name))
+            await db.save_player(participant["tag"], name, clan.get("tag"), clan.get("name"), normalise(name))
             return
 
 

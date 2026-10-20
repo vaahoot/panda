@@ -4,16 +4,31 @@ import aiofiles
 import aiosqlite
 import discord
 
+from clash.names import normalise
 from config.settings import DEFAULT_PREFIX
 
 # Keeps battlelog_checked_at so the crawler's progress isn't reset by updates
 UPSERT_PLAYER = """
-    INSERT INTO cr_player(tag, name, clan_name, search_name) VALUES(?, ?, ?, ?)
+    INSERT INTO cr_player(tag, name, clan_tag, clan_name, search_name) VALUES(?, ?, ?, ?, ?)
     ON CONFLICT(tag) DO UPDATE SET
         name = excluded.name,
+        clan_tag = excluded.clan_tag,
         clan_name = excluded.clan_name,
         search_name = excluded.search_name
 """
+
+UPSERT_CLAN = """
+    INSERT INTO cr_clan(tag, name, search_name) VALUES(?, ?, ?)
+    ON CONFLICT(tag) DO UPDATE SET
+        name = excluded.name,
+        search_name = excluded.search_name
+"""
+
+# Columns added after their table was first created: (table, column, type)
+ADDED_COLUMNS = [
+    ("cr_player", "clan_tag", "TEXT"),
+    ("cr_clan", "search_name", "TEXT"),
+]
 
 
 class Database:
@@ -26,10 +41,31 @@ class Database:
         self.connection = await aiosqlite.connect(self.path)
         # SQLite ignores ON DELETE CASCADE unless this is enabled per connection
         await self.connection.execute("PRAGMA foreign_keys = ON")
+        await self.migrate()
+        cursor = await self.connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'cr_player_fts'"
+        )
+        had_search_index = await cursor.fetchone() is not None
 
         async with aiofiles.open(self.schema) as f:
             schema_setup = await f.read()
         await self.connection.executescript(schema_setup)
+        await self.connection.commit()
+
+        if not had_search_index:
+            # Players stored before the index existed: index them once (~1-2 min for 10M)
+            await self.connection.execute("INSERT INTO cr_player_fts(cr_player_fts) VALUES('rebuild')")
+            await self.connection.commit()
+
+    async def migrate(self) -> None:
+        """Adds columns to tables created before them, CREATE TABLE IF NOT EXISTS doesn't."""
+        assert self.connection is not None
+        for table, column, column_type in ADDED_COLUMNS:
+            cursor = await self.connection.execute(f"PRAGMA table_info({table})")
+            columns = {row[1] for row in await cursor.fetchall()}
+            # No columns = table doesn't exist yet, the schema creates it with the column
+            if columns and column not in columns:
+                await self.connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
         await self.connection.commit()
 
     async def add_guild(self, guild: discord.Guild) -> None:
@@ -103,23 +139,84 @@ class Database:
     ) -> list[tuple[str, str | None, str]]:
         """Returns (tag, clan name, search name) of stored players whose normalised name contains search_name."""
         assert self.connection is not None
-        # instr instead of LIKE so '%' and '_' in names aren't treated as wildcards.
-        # Can't use an index, but a scan of 1M names is only ~100-300ms
+        if len(search_name) >= 3 and not any(c in search_name for c in "%_"):
+            # Trigram index: substring search in milliseconds. It needs 3+ characters, and
+            # '%'/'_' would act as wildcards (normalise() only leaves them in symbol-only names)
+            cursor = await self.connection.execute(
+                "SELECT p.tag, p.clan_name, p.search_name \
+                FROM cr_player_fts f \
+                JOIN cr_player p ON p.rowid = f.rowid \
+                WHERE f.search_name LIKE ? \
+                LIMIT ?",
+                (f"%{search_name}%", limit),
+            )
+        else:
+            # Too short for trigrams, and a substring that short matches far too many names anyway
+            cursor = await self.connection.execute(
+                "SELECT tag, clan_name, search_name \
+                FROM cr_player \
+                WHERE search_name = ? \
+                LIMIT ?",
+                (search_name, limit),
+            )
+        rows = await cursor.fetchall()
+        return [(row[0], row[1], row[2]) for row in rows]
+
+    async def get_players_by_exact_name(
+        self, search_name: str, limit: int
+    ) -> list[tuple[str, str | None, str]]:
+        """Returns (tag, clan name, search name) of stored players whose normalised name is exactly search_name."""
+        assert self.connection is not None
         cursor = await self.connection.execute(
             "SELECT tag, clan_name, search_name \
             FROM cr_player \
-            WHERE instr(search_name, ?) > 0 \
+            WHERE search_name = ? \
             LIMIT ?",
             (search_name, limit),
         )
         rows = await cursor.fetchall()
         return [(row[0], row[1], row[2]) for row in rows]
 
+    async def get_players_in_clans(
+        self, clan_search_name: str, partial: bool, limit: int, max_clans: int = 500
+    ) -> list[tuple[str, str, str]]:
+        """Returns (tag, player search name, clan search name) of members of stored clans whose
+        normalised name is clan_search_name, or contains it when partial."""
+        assert self.connection is not None
+        # Clans first, then their members through the clan_tag index. Joining in one query
+        # makes SQLite walk all players instead
+        if partial:
+            # ~330k clans, a scan of their short names is quick
+            cursor = await self.connection.execute(
+                "SELECT tag, search_name FROM cr_clan WHERE instr(search_name, ?) > 0 LIMIT ?",
+                (clan_search_name, max_clans + 1),
+            )
+        else:
+            cursor = await self.connection.execute(
+                "SELECT tag, search_name FROM cr_clan WHERE search_name = ? LIMIT ?",
+                (clan_search_name, max_clans + 1),
+            )
+        clans = dict(await cursor.fetchall())
+        if not clans or len(clans) > max_clans:
+            # Nothing, or a clan name so vague it matches hundreds of clans
+            return []
+
+        placeholders = ",".join("?" * len(clans))
+        cursor = await self.connection.execute(
+            f"SELECT tag, search_name, clan_tag FROM cr_player WHERE clan_tag IN ({placeholders}) LIMIT ?",
+            (*clans, limit),
+        )
+        rows = await cursor.fetchall()
+        return [(tag, search_name, clans[clan_tag]) for tag, search_name, clan_tag in rows]
+
     async def save_player(
-        self, tag: str, name: str, clan_name: str | None, search_name: str
+        self, tag: str, name: str, clan_tag: str | None, clan_name: str | None, search_name: str
     ) -> None:
         assert self.connection is not None
         await self.connection.execute(
-            UPSERT_PLAYER, (tag, name, clan_name, search_name)
+            UPSERT_PLAYER, (tag, name, clan_tag, clan_name, search_name)
         )
+        if clan_tag and clan_name:
+            # So the crawler picks up the rest of the clan and keeps it refreshed
+            await self.connection.execute(UPSERT_CLAN, (clan_tag, clan_name, normalise(clan_name)))
         await self.connection.commit()
