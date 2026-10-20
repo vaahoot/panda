@@ -53,6 +53,15 @@ Run everything together:
 docker compose up --build -d
 ```
 
+## Player database crawler
+`src/crawl_players.py` fills the `cr_player` table in `bot.db` with player tags, names and clan names from the official API, so players can be found by name without scraping. It starts from clan rankings and clan search in every location, then crawls clan member lists and battle logs. It can be stopped at any time and picks up where it left off when run again.
+
+```bash
+docker compose exec bot python3 src/crawl_players.py --max-players 1000000
+```
+
+Run it with `exec` inside the bot container so both share the same SQLite file and journal. Use `--rps` to change the request rate (default 15/s) and `--help` for the other options.
+
 ## Limitations
 ```
 1. The search is not guaranteed to work if the player has a very common name and no clan or their clan has a common name too.

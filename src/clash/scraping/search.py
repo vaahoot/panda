@@ -9,6 +9,7 @@ import log
 import net
 from clash.deck import get_deck
 from config import search_settings
+from database import Database
 
 from . import flaresolverr
 
@@ -159,41 +160,89 @@ async def search_player_in_clans(data: dict, name: str) -> str | None:
     return None
 
 
-async def find_deck_by_name(name: str, clan: str | None) -> list[dict[str, str]] | None:
+DB_SEARCH_LIMIT = 1000
+
+
+def pick_stored_player(rows: list[tuple[str, str | None]], clan: str | None) -> str | None:
+    """Picks the tag from stored (tag, clan name) rows, None if there's no single clear match."""
+    if not clan:
+        if len(rows) == 1:
+            return rows[0][0]
+        clanless = [tag for tag, clan_name in rows if not clan_name]
+        return clanless[0] if len(clanless) == 1 else None
+
+    clan = normalise(clan)
+    exact = [tag for tag, clan_name in rows if clan_name and normalise(clan_name) == clan]
+    if len(exact) == 1:
+        return exact[0]
+    partial = [tag for tag, clan_name in rows if clan_name and clan in normalise(clan_name)]
+    return partial[0] if len(partial) == 1 else None
+
+
+async def find_tag_in_database(db: Database, name: str, clan: str | None) -> str | None:
+    name = normalise(name)
+    rows = await db.get_players_by_name(name, DB_SEARCH_LIMIT)
+
+    # Prefer players whose whole name matches, then any name containing it
+    exact = [(tag, clan_name) for tag, clan_name, search_name in rows if search_name == name]
+    tag = pick_stored_player(exact, clan)
+    if tag or len(rows) >= DB_SEARCH_LIMIT:
+        # A capped result may be missing the right player, so a "unique" substring match isn't trustworthy
+        return tag
+
+    return pick_stored_player([(tag, clan_name) for tag, clan_name, _ in rows], clan)
+
+
+async def find_tag_by_name(name: str, clan: str | None) -> str | None:
     search_players = await search_player_by_name(name)
     players = parse_players(search_players)
-    player_tag = find_player_tag(players, clan)
-
-    if not player_tag:
-        return None
-
-    await log.info(f"Found player by name. Tag: {player_tag}")
-    data = await get_battle_log(player_tag)
-    return await get_deck.get_last_deck(data)
+    return find_player_tag(players, clan)
 
 
-async def find_deck_by_clan(name: str, clan: str) -> list[dict[str, str]] | None:
-    # search_clans = await search_clans_by_name(clan)
+async def find_tag_by_clan(name: str, clan: str) -> str | None:
     clans = await search_clans_by_name(clan)
-    member_tag = await search_player_in_clans(clans, name)
+    return await search_player_in_clans(clans, name)
 
-    if not member_tag:
+
+async def find_tag(db: Database, name: str, clan: str | None) -> str | None:
+    tag = await find_tag_in_database(db, name, clan)
+    if tag:
+        await log.info(f"Found player in database. Tag: {tag}")
+        return tag
+
+    if clan:
+        tag = await find_tag_by_clan(name, clan)
+        if tag:
+            await log.info(f"Found player by clan. Tag: {tag}")
+            return tag
+
+    tag = await find_tag_by_name(name, clan)
+    if tag:
+        await log.info(f"Found player by name. Tag: {tag}")
+    return tag
+
+
+async def save_player_from_battle_log(db: Database, tag: str, battles: list[dict]) -> None:
+    """Stores the player's current name and clan, taken from their latest battle."""
+    # Scraped tags may come without the '#' or in a different case
+    wanted = tag.lstrip("#").upper()
+    for battle in battles:
+        for participant in battle.get("team", []):
+            if participant.get("tag", "").lstrip("#").upper() != wanted or not participant.get("name"):
+                continue
+            clan_name = (participant.get("clan") or {}).get("name")
+            name = participant["name"]
+            await db.save_player(participant["tag"], name, clan_name, normalise(name))
+            return
+
+
+async def find_deck(db: Database, name: str, clan: str | None) -> list[dict[str, str]] | None:
+    tag = await find_tag(db, name, clan)
+    if not tag:
+        await log.info(f"Player {name} not found")
         return None
 
-    await log.info(f"Found player by clan. Tag: {member_tag}")
-    data = await get_battle_log(member_tag)
+    data = await get_battle_log(tag)
+    # Adds players found by the fallback searches and refreshes stale names/clans
+    await save_player_from_battle_log(db, tag, data)
     return await get_deck.get_last_deck(data)
-
-
-async def find_deck(name: str, clan: str | None) -> list[dict[str, str]] | None:
-    if not clan:
-        return await find_deck_by_name(name, clan)
-
-    deck = await find_deck_by_clan(name, clan)
-    if not deck:
-        deck = await find_deck_by_name(name, clan)
-
-    if not deck:
-        await log.info(f"Player {name} not found")
-
-    return deck

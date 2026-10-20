@@ -6,6 +6,15 @@ import discord
 
 from config.settings import DEFAULT_PREFIX
 
+# Keeps battlelog_checked_at so the crawler's progress isn't reset by updates
+UPSERT_PLAYER = """
+    INSERT INTO cr_player(tag, name, clan_name, search_name) VALUES(?, ?, ?, ?)
+    ON CONFLICT(tag) DO UPDATE SET
+        name = excluded.name,
+        clan_name = excluded.clan_name,
+        search_name = excluded.search_name
+"""
+
 
 class Database:
     def __init__(self, path: pathlib.Path, schema: pathlib.Path):
@@ -88,3 +97,29 @@ class Database:
         )
         row = await cursor.fetchone()
         return row is not None
+
+    async def get_players_by_name(
+        self, search_name: str, limit: int
+    ) -> list[tuple[str, str | None, str]]:
+        """Returns (tag, clan name, search name) of stored players whose normalised name contains search_name."""
+        assert self.connection is not None
+        # instr instead of LIKE so '%' and '_' in names aren't treated as wildcards.
+        # Can't use an index, but a scan of 1M names is only ~100-300ms
+        cursor = await self.connection.execute(
+            "SELECT tag, clan_name, search_name \
+            FROM cr_player \
+            WHERE instr(search_name, ?) > 0 \
+            LIMIT ?",
+            (search_name, limit),
+        )
+        rows = await cursor.fetchall()
+        return [(row[0], row[1], row[2]) for row in rows]
+
+    async def save_player(
+        self, tag: str, name: str, clan_name: str | None, search_name: str
+    ) -> None:
+        assert self.connection is not None
+        await self.connection.execute(
+            UPSERT_PLAYER, (tag, name, clan_name, search_name)
+        )
+        await self.connection.commit()

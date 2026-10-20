@@ -9,6 +9,7 @@ dotenv.load_dotenv()
 ROYALE_API_PLAYER_SEARCH = "https://royaleapi.com/player/search/results?q={0}"
 ROYALE_API_CLAN_SEARCH = "https://royaleapi.com/clans/search?name={0}"
 
+CR_API_BASE = "https://proxy.royaleapi.dev/v1"
 CR_API_BATTLE_LOG = "https://proxy.royaleapi.dev/v1/players/{0}/battlelog"
 CR_API_CLAN_MEMBERS = "https://proxy.royaleapi.dev/v1/clans/{0}/members"
 CR_API_CLAN_SEARCH = "https://proxy.royaleapi.dev/v1/clans?name={0}&limit=30"

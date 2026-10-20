@@ -148,7 +148,7 @@ class Panda(commands.Bot):
         channel = message.channel
 
         async with channel.typing():
-            deck = await search.find_deck(name, clan)
+            deck = await search.find_deck(self.db, name, clan)
 
             if not deck:
                 embed = discord.Embed(title="No deck Found", color=settings.ERROR_COLOR)
