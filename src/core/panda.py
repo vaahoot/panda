@@ -1,3 +1,4 @@
+import asyncio
 import time
 
 import aiohttp.client_exceptions
@@ -30,6 +31,7 @@ class Panda(commands.Bot):
         self.db = database.Database(paths.DATABASE, paths.SCHEMA)
         self.claude_client = claude_client
         self.template_gray, self.mask = screenshots.load_template(paths.SHIELD_TEMPLATE)
+        self.flaresolverr_task: asyncio.Task | None = None
 
         # Shared between !screenshot, screenshot channels and DMs
         self.screenshot_cooldown = commands.CooldownMapping.from_cooldown(
@@ -61,7 +63,9 @@ class Panda(commands.Bot):
         await self.load_extension("cogs.support")
         await self.load_extension("cogs.music")
 
-        await flaresolverr.create_flaresolverr_session()
+        # FlareSolverr's Cloudflare warm-up takes a while, so don't make startup wait for it.
+        # Only RoyaleAPI name scraping needs it, the other searches work straight away
+        self.flaresolverr_task = asyncio.create_task(self.start_flaresolverr())
 
         await self.db.connect()
         await log.info(f"Database connected: {self.db.connection}")
@@ -106,8 +110,19 @@ class Panda(commands.Bot):
         await log.info(f"Left guild {guild.name}, id: {guild.id}")
         await self.db.remove_guild(guild)
 
+    async def start_flaresolverr(self) -> None:
+        try:
+            await flaresolverr.create_flaresolverr_session()
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            await log.warning(f"Couldn't start a FlareSolverr session, RoyaleAPI name search won't work: {e}")
+
     async def close(self) -> None:
-        await flaresolverr.destroy_flaresolverr_session()
+        if self.flaresolverr_task and not self.flaresolverr_task.done():
+            self.flaresolverr_task.cancel()
+        try:
+            await flaresolverr.destroy_flaresolverr_session()
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            pass  # Never created or FlareSolverr is down, nothing to clean up
         await net.close()
         if self.db.connection:
             await self.db.connection.close()
