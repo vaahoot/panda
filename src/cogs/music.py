@@ -20,6 +20,8 @@ PLAYLIST_LINK = re.compile(
     re.IGNORECASE,
 )
 PLAYLIST_NAME_LIMIT = 100  # Discord's limit for a select option label
+# Lavalink lookups at once when loading a playlist, so big playlists don't flood it
+PLAYLIST_LOAD_CONCURRENCY = 10
 EMBED_DESCRIPTION_LIMIT = 4096
 
 
@@ -165,10 +167,16 @@ class Music(commands.Cog, name="🎶 Music"):
         if player is None:
             return
 
+        semaphore = asyncio.Semaphore(PLAYLIST_LOAD_CONCURRENCY)
+
+        async def search(url: str) -> wavelink.Search:
+            async with semaphore:
+                return await wavelink.Playable.search(url)
+
         async with ctx.typing():
+            # Keeps the playlist's order, failed tracks come back as exceptions
             results = await asyncio.gather(
-                *(wavelink.Playable.search(url) for url in urls),
-                return_exceptions=True,
+                *(search(url) for url in urls), return_exceptions=True
             )
 
         tracks: list[wavelink.Playable] = []

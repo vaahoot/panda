@@ -3,6 +3,7 @@ from collections.abc import Awaitable, Callable
 import discord
 from discord.ext import commands
 
+import log
 from config import settings
 
 SELECT_OPTION_LIMIT = 25  # Discord's limit for options in a select menu
@@ -51,6 +52,23 @@ class PlaylistView(discord.ui.View):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return False
+
+    async def on_error(
+        self,
+        interaction: discord.Interaction,
+        error: Exception,
+        item: discord.ui.Item,
+    ) -> None:
+        # The bot's command error handler doesn't see errors from menus, so report them here
+        await log.error(f"Playlist menu failed: {type(error).__name__}: {error}")
+        embed = discord.Embed(
+            description="Something went wrong with that playlist. Try again!",
+            color=settings.ERROR_COLOR,
+        )
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed)
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
 
     async def on_timeout(self) -> None:
         if self.message is not None:
