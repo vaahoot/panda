@@ -11,7 +11,7 @@ import core
 import log
 from config import settings
 from music import PandaPlayer
-from music.views import SELECT_OPTION_LIMIT, PlaylistView
+from music.views import SELECT_OPTION_LIMIT, PlaylistView, TrackView
 
 PLAYLIST_LINK = re.compile(
     r"^((https?://)?((www|m|music)\.)?(youtube\.com|youtu\.be)/"
@@ -397,6 +397,41 @@ class Music(commands.Cog, name="🎶 Music"):
 
     @commands.command(brief="Shuffle the queue.")
     @commands.guild_only()
+    async def send_track_menu(self, ctx: commands.Context, name: str) -> None:
+        """Send a dropdown of the tracks in the author's playlist, deleting the chosen one."""
+        embed = discord.Embed(color=settings.ERROR_COLOR)
+
+        playlist_id = await self.bot.db.get_playlist_id(ctx.author, name)
+        if playlist_id is None:
+            embed.description = f"You don't have a playlist called **{name}**."
+            await ctx.reply(embed=embed)
+            return
+
+        tracks = await self.bot.db.get_playlist_tracks(playlist_id)
+        if not tracks:
+            embed.description = f"**{name}** doesn't have any tracks."
+            await ctx.reply(embed=embed)
+            return
+
+        async def on_select(track_id: int, title: str) -> None:
+            deleted = await self.bot.db.delete_playlist_track(playlist_id, track_id)
+            if deleted:
+                embed.color = settings.MAIN_COLOR
+                embed.description = f"Removed **{title}** from **{name}**."
+            else:
+                embed.description = f"**{title}** is no longer in **{name}**."
+            await ctx.send(embed=embed)
+
+        view = TrackView(ctx, tracks, on_select)
+        view.message = await ctx.send(
+            embed=discord.Embed(
+                title=name,
+                description="Pick a track to remove from the playlist.",
+                color=settings.MAIN_COLOR,
+            ),
+            view=view,
+        )
+
     async def shuffle(self, ctx: commands.Context):
         """Shuffle the queue."""
         player: PandaPlayer = cast("PandaPlayer", ctx.voice_client)
@@ -464,6 +499,24 @@ class Music(commands.Cog, name="🎶 Music"):
 
         await self.send_playlist_menu(
             ctx, "Pick a playlist to save the track to.", on_select
+        )
+
+    @commands.command(aliases=["rt"], brief="[name] Remove a track from a playlist.")
+    async def remove_track(
+        self, ctx: commands.Context, *, name: str | None = None
+    ) -> None:
+        """Remove a track from one of your playlists.
+        Without a name you'll get a menu to pick from your playlists,
+        then a menu to pick the track to remove."""
+        if name is not None:
+            await self.send_track_menu(ctx, name.strip())
+            return
+
+        async def on_select(chosen: str) -> None:
+            await self.send_track_menu(ctx, chosen)
+
+        await self.send_playlist_menu(
+            ctx, "Pick a playlist to remove a track from.", on_select
         )
 
     @commands.command(aliases=["pl"], brief="[name] Play one of your playlists.")

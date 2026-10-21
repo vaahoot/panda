@@ -262,6 +262,31 @@ class Database:
         rows = await cursor.fetchall()
         return [row[0] for row in rows]
 
+    async def get_playlist_tracks(
+        self, playlist_id: int
+    ) -> list[tuple[int, str | None, str | None]]:
+        """Returns (track id, title, author) for each track in the playlist."""
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "SELECT track_id, title, author \
+            FROM playlist_track \
+            WHERE playlist_id = ? \
+            ORDER BY track_id",
+            (playlist_id,),
+        )
+        rows = await cursor.fetchall()
+        return [(row[0], row[1], row[2]) for row in rows]
+
+    async def delete_playlist_track(self, playlist_id: int, track_id: int) -> bool:
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "DELETE FROM playlist_track \
+            WHERE playlist_id = ? AND track_id = ?",
+            (playlist_id, track_id),
+        )
+        await self.connection.commit()
+        return cursor.rowcount > 0
+
     async def get_playlist_summaries(self, user: discord.abc.User) -> list[tuple[str, int]]:
         """Returns (name, track count) for each of the user's playlists."""
         assert self.connection is not None
