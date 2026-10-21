@@ -3,10 +3,16 @@ import io
 import pathlib
 import urllib.parse
 
-from PIL import Image, UnidentifiedImageError
+import aiohttp
+from PIL import Image
 
+import log
 import net
 from config import paths
+
+# Everything that can go wrong getting one card image. PIL raises OSError for anything it
+# can't decode (UnidentifiedImageError is one) and aiohttp for failed downloads
+IMAGE_ERRORS = (OSError, aiohttp.ClientError, asyncio.TimeoutError)
 
 # Card icons never change, so keep them in memory for the lifetime of the bot
 _image_cache: dict[str, Image.Image] = {}
@@ -26,21 +32,35 @@ def save_file(path: pathlib.Path, data: bytes) -> None:
     temp.replace(path)
 
 
+def decode(data: bytes) -> Image.Image:
+    img = Image.open(io.BytesIO(data))
+    # Decodes the whole image, so a cut-off file fails here rather than when drawing the deck
+    img.load()
+    return img
+
+
 async def fetch_image(url: str, file: pathlib.Path | None = None) -> Image.Image:
     """Card image from memory, then from disk, then downloaded and saved to disk."""
     if url in _image_cache:
         return _image_cache[url]
 
     if file is not None and file.exists():
-        data = await asyncio.to_thread(file.read_bytes)
-    else:
-        async with net.session().get(url) as response:
-            data = await response.read()
+        try:
+            img = decode(await asyncio.to_thread(file.read_bytes))
+            _image_cache[url] = img
+            return img
+        except OSError as e:
+            # A damaged file would otherwise fail on every deck, get a fresh copy instead
+            await log.warning(f"Stored card image {file.name} is unreadable, downloading it again: {e}")
+            await asyncio.to_thread(file.unlink, missing_ok=True)
 
-    img = Image.open(io.BytesIO(data))
-    img.load()
-    # Only valid images are kept, an error page would raise UnidentifiedImageError above
-    if file is not None and not file.exists():
+    async with net.session().get(url) as response:
+        response.raise_for_status()
+        data = await response.read()
+
+    # Only valid images are saved: anything that doesn't decode raises before this
+    img = decode(data)
+    if file is not None:
         await asyncio.to_thread(save_file, file, data)
     _image_cache[url] = img
     return img
@@ -93,15 +113,14 @@ async def get_card_info(card: dict) -> dict:
     if key not in card_icons:
         key = "medium"
 
-    try:
-        card_info["img"] = await fetch_card_image(card, key)
-    except UnidentifiedImageError:
-        if key != "medium":
-            try:
-                card_info["img"] = await fetch_card_image(card, "medium")
-            except UnidentifiedImageError:
-                card_info["img"] = None
-        else:
-            card_info["img"] = None
+    # The evolution/hero image first, then the normal one, then the deck image draws a placeholder.
+    # One bad image never fails the whole deck
+    card_info["img"] = None
+    for image_key in dict.fromkeys([key, "medium"]):
+        try:
+            card_info["img"] = await fetch_card_image(card, image_key)
+            break
+        except IMAGE_ERRORS as e:
+            await log.warning(f"Couldn't get the {image_key} image for {card_info['name']}: {type(e).__name__}: {e}")
 
     return card_info
