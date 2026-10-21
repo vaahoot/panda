@@ -1,5 +1,5 @@
 import asyncio
-import unicodedata
+import sqlite3
 import urllib.parse
 
 import aiohttp
@@ -8,13 +8,11 @@ import bs4
 import log
 import net
 from clash.deck import get_deck
+from clash.names import normalise
 from config import search_settings
+from database import Database
 
 from . import flaresolverr
-
-
-def normalise(text: str) -> str:
-    return unicodedata.normalize("NFKC", text).lower().strip()
 
 
 async def search(link: str, selector: str) -> str:
@@ -37,7 +35,7 @@ async def search_player_by_name(name: str) -> str:
 
 
 async def cr_api_get(url: str):
-    """GET from the CR API proxy, retrying the random 5xx errors (mostly 520) it returns."""
+    """GET from the CR API, retrying the random 5xx errors (mostly 520 from the proxy) it returns."""
     for attempt in range(search_settings.CR_API_RETRIES):
         try:
             async with net.session().get(
@@ -88,19 +86,6 @@ def parse_players(html: str) -> list[dict]:
     return players
 
 
-# Not used anymore, will delete if searching clans using official API doesn't work out well.
-def parse_clans(html: str) -> list[str]:
-    soup = bs4.BeautifulSoup(html, "html.parser")
-    results = soup.find_all("div", class_="clanresult")
-
-    clans = []
-    for result in results:
-        clan_tag = "%23" + str(result["data-clantag"])
-        clans.append(clan_tag)
-
-    return clans
-
-
 def find_player_tag(players: list[dict], clan: str | None) -> str | None:
     if len(players) == 1:
         return players[0]["tag"]
@@ -111,7 +96,7 @@ def find_player_tag(players: list[dict], clan: str | None) -> str | None:
 
     else:
         for player in players:
-            if player["clan"] and clan.lower() in player["clan"]:
+            if player["clan"] and normalise(clan) in player["clan"]:
                 return player["tag"]
 
     return None
@@ -129,8 +114,11 @@ async def get_clan_members(clan_tag: str) -> dict:
 
 def find_member_in_clan(data: dict, name: str) -> str | None:
     members = data["items"]
+    name = normalise(name)
+    if not name:
+        return None
     for member in members:
-        if name.lower() in member["name"].lower():
+        if name in normalise(member["name"]):
             return member["tag"]
     return None
 
@@ -159,41 +147,133 @@ async def search_player_in_clans(data: dict, name: str) -> str | None:
     return None
 
 
-async def find_deck_by_name(name: str, clan: str | None) -> list[dict[str, str]] | None:
+DB_SEARCH_LIMIT = 1000
+DB_CLAN_MEMBERS_LIMIT = 5000
+
+
+def pick_clanless(rows: list[tuple[str, str | None]]) -> str | None:
+    """With no clan given: the only player, or the only one without a clan."""
+    if len(rows) == 1:
+        return rows[0][0]
+    clanless = [tag for tag, clan_name in rows if not clan_name]
+    return clanless[0] if len(clanless) == 1 else None
+
+
+# Closest first. Names cut off in a screenshot lose their end, so "starts with" beats "contains"
+MATCH_LEVELS = (str.__eq__, str.startswith, str.__contains__)
+
+
+def pick_by_name_and_clan(candidates: dict[str, tuple[str, str]], name: str, clan: str) -> str | None:
+    """candidates maps tag -> (player key, clan key). Tries the closest matches first: same clan
+    and same name, then looser ones. The first level with any match decides: one player is the
+    answer, several means the database can't tell them apart."""
+    for clan_matches in MATCH_LEVELS:
+        for name_matches in MATCH_LEVELS:
+            tags = [
+                tag for tag, (player_key, clan_key) in candidates.items()
+                if clan_key and clan_matches(clan_key, clan) and name_matches(player_key, name)
+            ]
+            if tags:
+                return tags[0] if len(tags) == 1 else None
+    return None
+
+
+async def find_tag_in_database(db: Database, name: str, clan: str | None) -> str | None:
+    name = normalise(name)
+    if not name:
+        # An empty key is a substring of every name
+        return None
+
+    # The name alone is enough when only one stored player has it
+    exact = await db.get_players_by_exact_name(name, DB_SEARCH_LIMIT)
+    if len(exact) == 1:
+        return exact[0][0]
+    containing = await db.get_players_by_name(name, DB_SEARCH_LIMIT)
+    if not exact and len(containing) == 1:
+        return containing[0][0]
+
+    clan = normalise(clan) if clan else ""
+    if not clan:
+        if exact:
+            return pick_clanless([(tag, clan_name) for tag, clan_name, _ in exact])
+        if len(containing) >= DB_SEARCH_LIMIT:
+            # A capped result may be missing the right player
+            return None
+        return pick_clanless([(tag, clan_name) for tag, clan_name, _ in containing])
+
+    # Players matching the name, plus members of clans matching the clan. The second half
+    # still finds common names whose matches didn't all fit in the name results
+    candidates = {
+        tag: (search_name, normalise(clan_name) if clan_name else "")
+        for tag, clan_name, search_name in exact + containing
+    }
+    members = await db.get_players_in_clans(clan, partial=False, limit=DB_CLAN_MEMBERS_LIMIT)
+    if not members:
+        members = await db.get_players_in_clans(clan, partial=True, limit=DB_CLAN_MEMBERS_LIMIT)
+    for tag, search_name, clan_key in members:
+        candidates[tag] = (search_name, clan_key)
+
+    return pick_by_name_and_clan(candidates, name, clan)
+
+
+async def find_tag_by_name(name: str, clan: str | None) -> str | None:
     search_players = await search_player_by_name(name)
     players = parse_players(search_players)
-    player_tag = find_player_tag(players, clan)
-
-    if not player_tag:
-        return None
-
-    await log.info(f"Found player by name. Tag: {player_tag}")
-    data = await get_battle_log(player_tag)
-    return await get_deck.get_last_deck(data)
+    return find_player_tag(players, clan)
 
 
-async def find_deck_by_clan(name: str, clan: str) -> list[dict[str, str]] | None:
-    # search_clans = await search_clans_by_name(clan)
+async def find_tag_by_clan(name: str, clan: str) -> str | None:
     clans = await search_clans_by_name(clan)
-    member_tag = await search_player_in_clans(clans, name)
+    return await search_player_in_clans(clans, name)
 
-    if not member_tag:
+
+async def find_tag(db: Database, name: str, clan: str | None) -> str | None:
+    try:
+        tag = await find_tag_in_database(db, name, clan)
+    except sqlite3.OperationalError as e:
+        # e.g. still locked by the crawler after the busy timeout, the API searches still work
+        await log.warning(f"Database search failed, falling back to the API: {e}")
+        tag = None
+    if tag:
+        await log.info(f"Found player in database. Tag: {tag}")
+        return tag
+
+    if clan:
+        tag = await find_tag_by_clan(name, clan)
+        if tag:
+            await log.info(f"Found player by clan. Tag: {tag}")
+            return tag
+
+    tag = await find_tag_by_name(name, clan)
+    if tag:
+        await log.info(f"Found player by name. Tag: {tag}")
+    return tag
+
+
+async def save_player_from_battle_log(db: Database, tag: str, battles: list[dict]) -> None:
+    """Stores the player's current name and clan, taken from their latest battle."""
+    # Scraped tags may come without the '#' or in a different case
+    wanted = tag.lstrip("#").upper()
+    for battle in battles:
+        for participant in battle.get("team", []):
+            if participant.get("tag", "").lstrip("#").upper() != wanted or not participant.get("name"):
+                continue
+            clan = participant.get("clan") or {}
+            name = participant["name"]
+            await db.save_player(participant["tag"], name, clan.get("tag"), clan.get("name"), normalise(name))
+            return
+
+
+async def find_deck(db: Database, name: str, clan: str | None) -> list[dict[str, str]] | None:
+    tag = await find_tag(db, name, clan)
+    if not tag:
+        await log.info(f"Player {name} not found")
         return None
 
-    await log.info(f"Found player by clan. Tag: {member_tag}")
-    data = await get_battle_log(member_tag)
+    data = await get_battle_log(tag)
+    # Adds players found by the fallback searches and refreshes stale names/clans
+    try:
+        await save_player_from_battle_log(db, tag, data)
+    except sqlite3.OperationalError as e:
+        await log.warning(f"Couldn't save player {tag}: {e}")
     return await get_deck.get_last_deck(data)
-
-
-async def find_deck(name: str, clan: str | None) -> list[dict[str, str]] | None:
-    if not clan:
-        return await find_deck_by_name(name, clan)
-
-    deck = await find_deck_by_clan(name, clan)
-    if not deck:
-        deck = await find_deck_by_name(name, clan)
-
-    if not deck:
-        await log.info(f"Player {name} not found")
-
-    return deck

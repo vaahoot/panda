@@ -9,5 +9,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 CR_API_KEY = os.getenv("CR_API_KEY")
 CR_API_HEADERS = {"Authorization": f"Bearer {CR_API_KEY}"}
+# The crawler can use its own key, e.g. one bound to the VPS's IP. Falls back to the bot's
+CR_CRAWLER_API_KEY = os.getenv("CR_CRAWLER_API_KEY") or CR_API_KEY
 
 LAVALINK_PASSWORD = os.getenv("LAVALINK_PASSWORD", "password")

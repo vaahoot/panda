@@ -1,3 +1,4 @@
+import os
 import pathlib
 
 FILE = pathlib.Path(__file__)
@@ -8,8 +9,13 @@ COGS = SRC / "cogs/"
 
 ASSETS = ROOT / "assets/"
 DB = ROOT / "db/"
-LOGS = ROOT / "bot.log"
-DATABASE = ROOT / "bot.db"
+# A folder, not just the file, so containers sharing the database also share SQLite's journal
+DATA = ROOT / "data/"
+DATABASE = DATA / "bot.db"
+# Card images, downloaded once and reused for deck images
+CARD_IMAGES = DATA / "cards/"
+# The crawler container sets LOG_FILE so its progress doesn't mix with the bot's log
+LOGS = pathlib.Path(os.getenv("LOG_FILE", ROOT / "bot.log"))
 
 IMAGES = ASSETS / "images/"
 FONTS = ASSETS / "fonts/"

@@ -8,6 +8,8 @@ temp.*
 
 bot.log
 bot.db
+bot.db.old
+data/
 
 *.db-journal
 *.db-wal

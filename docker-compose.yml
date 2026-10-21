@@ -12,12 +12,32 @@ services:
 
     volumes:
       - ./bot.log:/app/bot.log
-      - ./bot.db:/app/bot.db
+      - ./data:/app/data
       - ./src:/app/src/
 
     depends_on:
       - flaresolverr
       - lavalink
+
+  # Fills the player database. Only starts when named: `docker compose up -d crawler`,
+  # stop it with `docker compose stop crawler` (it saves the batch it's on before exiting)
+  crawler:
+    build: .
+    profiles: ["crawler"]
+    command: ["python3", "src/crawl_players.py"]
+    restart: unless-stopped
+    # In-flight requests can take up to 30s to finish before it saves and exits
+    stop_grace_period: 1m
+
+    env_file:
+      - .env
+
+    environment:
+      - LOG_FILE=/app/data/crawler.log
+
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src/
 
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
