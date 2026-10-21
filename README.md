@@ -76,14 +76,15 @@ docker compose run --rm crawler python3 src/crawl_players.py --max-players 10000
 
 The database lives in `data/` rather than as a single mounted file so the bot and crawler containers share SQLite's journal. Databases from before this change have to be moved once, with everything stopped: `mkdir -p data && mv bot.db data/`.
 
-By default the crawler uses the same key and RoyaleAPI proxy as the bot. On a server with a fixed IP it can call the official API directly with its own key, created for that IP at developer.clashroyale.com. Add these to `.env`:
+By default the bot and the crawler send API requests through the RoyaleAPI proxy, which only needs a key allowed for the proxy's IP. On a server with a fixed IP they can call the official API directly instead, which is faster. Create keys allowed for that IP at developer.clashroyale.com and add to `.env`:
 
 ```bash
-CR_CRAWLER_API_KEY="key_allowed_for_your_server_ip"
-CR_CRAWLER_API_BASE="https://api.clashroyale.com/v1"
+CR_API_BASE="https://api.clashroyale.com/v1"
+CR_API_KEY="key_allowed_for_your_server_ip"          # the bot's searches
+CR_CRAWLER_API_KEY="another_key_for_your_server_ip"  # the crawler, so it has its own rate limit
 ```
 
-The bot's own searches keep using `CR_API_KEY` through the proxy.
+`CR_CRAWLER_API_BASE` sends just the crawler somewhere else, overriding `CR_API_BASE`.
 
 To keep everyone's clan up to date, re-crawl clans that haven't been checked in a while. Each clan request updates all of its members' names and clans and clears players who left, and the run stops once every clan is fresh:
 

@@ -35,7 +35,7 @@ async def search_player_by_name(name: str) -> str:
 
 
 async def cr_api_get(url: str):
-    """GET from the CR API proxy, retrying the random 5xx errors (mostly 520) it returns."""
+    """GET from the CR API, retrying the random 5xx errors (mostly 520 from the proxy) it returns."""
     for attempt in range(search_settings.CR_API_RETRIES):
         try:
             async with net.session().get(
