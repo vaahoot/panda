@@ -30,6 +30,10 @@ from database import Database
 from database.database import UPSERT_CLAN, UPSERT_PLAYER
 
 BATCH_SIZE = 500
+# Players per write transaction. Smaller = the bot's writes wait less, larger = less overhead
+SAVE_CHUNK_PLAYERS = 2000
+# The database is far bigger than SQLite's default ~2MB page cache, this halves save times
+CACHE_SIZE_MB = 256
 MAX_RETRIES = 5
 
 
@@ -260,13 +264,44 @@ async def clear_leavers(db: aiosqlite.Connection, clan_tag: str, member_tags: li
         await db.execute("DELETE FROM cr_clan WHERE tag = ?", (clan_tag,))
 
 
+async def save_results(db: aiosqlite.Connection, finished: list[tuple[str, tuple]], mark_done: str) -> None:
+    """Saves (tag, result) pairs in transactions of about SAVE_CHUNK_PLAYERS players, so the bot
+    never waits long for its own writes. Each chunk marks its tags done, so a stop between
+    chunks loses nothing."""
+    chunk: list[tuple[str, tuple]] = []
+    size = 0
+    for item in finished:
+        chunk.append(item)
+        size += len(item[1][1])
+        if size >= SAVE_CHUNK_PLAYERS:
+            await save_chunk(db, chunk, mark_done)
+            chunk, size = [], 0
+    if chunk:
+        await save_chunk(db, chunk, mark_done)
+
+
+async def save_chunk(db: aiosqlite.Connection, chunk: list[tuple[str, tuple]], mark_done: str) -> None:
+    now = int(time.time())
+    results = [result for _, result in chunk]
+    await db.executemany(UPSERT_CLAN, [clan for result in results for clan in result[0]])
+    await db.executemany(UPSERT_PLAYER, [player for result in results for player in result[1]])
+    # Players who moved between two clans end up right in either order: a clan only clears
+    # members still stored under its own tag, and the other clan's upsert sets the new one
+    for result in results:
+        if result[2] is not None:
+            await clear_leavers(db, *result[2])
+    await db.executemany(mark_done, [(now, tag) for tag, _ in chunk])
+    await db.commit()
+
+
 async def crawl(
     api: Api, db: aiosqlite.Connection, max_players: int, max_requests: int, refresh_days: float
 ) -> None:
     refresh_before = int(time.time() - refresh_days * 86400) if refresh_days else None
+    # Counting 10M+ rows takes a moment, so it's done once per batch, after saving
+    total_players = await count(db, "SELECT COUNT(*) FROM cr_player")
 
     while True:
-        total_players = await count(db, "SELECT COUNT(*) FROM cr_player")
         if max_players and total_players >= max_players:
             await log.info(f"Database has {total_players} players, at or above --max-players {max_players} (a total, not players to add), stopping")
             return
@@ -319,16 +354,9 @@ async def crawl(
         done_tags = [tag for tag, _ in finished]
         results = [result for _, result in finished]
 
-        # Write the whole batch in one short transaction so the bot is never blocked for long
-        now = int(time.time())
-        await db.executemany(UPSERT_CLAN, [clan for result in results for clan in result[0]])
-        await db.executemany(UPSERT_PLAYER, [player for result in results for player in result[1]])
-        # After the upserts, so players who moved between two clans in this batch keep their new clan
-        for result in results:
-            if result[2] is not None:
-                await clear_leavers(db, *result[2])
-        await db.executemany(mark_done, [(now, tag) for tag in done_tags])
-        await db.commit()
+        save_started = time.monotonic()
+        await save_results(db, list(zip(done_tags, results)), mark_done)
+        save_seconds = time.monotonic() - save_started
 
         total_players = await count(db, "SELECT COUNT(*) FROM cr_player")
         pending_clans = await count(db, "SELECT COUNT(*) FROM cr_clan WHERE members_checked_at IS NULL")
@@ -338,7 +366,7 @@ async def crawl(
                 "SELECT COUNT(*) FROM cr_clan WHERE members_checked_at < ?", (refresh_before,)
             )
             status += f" | clans to refresh: {(await cursor.fetchone())[0]}"
-        await log.info(f"{status} | requests: {api.requests} ({api.rate():.1f}/s)")
+        await log.info(f"{status} | requests: {api.requests} ({api.rate():.1f}/s) | saved in {save_seconds:.1f}s")
 
         if errors:
             raise errors[0]
@@ -367,6 +395,7 @@ async def main() -> None:
     await database.connect()
     db = database.connection
     assert db is not None
+    await db.execute(f"PRAGMA cache_size = -{CACHE_SIZE_MB * 1024}")
     api = Api(args.rps, args.concurrency)
     await log.info(f"Sending API requests to {search_settings.CR_CRAWLER_API_BASE}")
 

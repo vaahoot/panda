@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 import urllib.parse
 
 import aiohttp
@@ -227,7 +228,12 @@ async def find_tag_by_clan(name: str, clan: str) -> str | None:
 
 
 async def find_tag(db: Database, name: str, clan: str | None) -> str | None:
-    tag = await find_tag_in_database(db, name, clan)
+    try:
+        tag = await find_tag_in_database(db, name, clan)
+    except sqlite3.OperationalError as e:
+        # e.g. still locked by the crawler after the busy timeout, the API searches still work
+        await log.warning(f"Database search failed, falling back to the API: {e}")
+        tag = None
     if tag:
         await log.info(f"Found player in database. Tag: {tag}")
         return tag
@@ -266,5 +272,8 @@ async def find_deck(db: Database, name: str, clan: str | None) -> list[dict[str,
 
     data = await get_battle_log(tag)
     # Adds players found by the fallback searches and refreshes stale names/clans
-    await save_player_from_battle_log(db, tag, data)
+    try:
+        await save_player_from_battle_log(db, tag, data)
+    except sqlite3.OperationalError as e:
+        await log.warning(f"Couldn't save player {tag}: {e}")
     return await get_deck.get_last_deck(data)

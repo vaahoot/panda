@@ -1,11 +1,15 @@
 import pathlib
+import sqlite3
 
 import aiofiles
 import aiosqlite
 import discord
 
+import log
 from clash.names import normalise
 from config.settings import DEFAULT_PREFIX
+
+BUSY_TIMEOUT_SECONDS = 30
 
 # Keeps battlelog_checked_at so the crawler's progress isn't reset by updates
 UPSERT_PLAYER = """
@@ -39,9 +43,14 @@ class Database:
 
     async def connect(self) -> None:
         pathlib.Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        self.connection = await aiosqlite.connect(self.path)
+        # The bot and the crawler share this file: wait for each other's writes instead of
+        # failing with "database is locked" after the default 5s
+        self.connection = await aiosqlite.connect(self.path, timeout=BUSY_TIMEOUT_SECONDS)
         # SQLite ignores ON DELETE CASCADE unless this is enabled per connection
         await self.connection.execute("PRAGMA foreign_keys = ON")
+        await self.use_wal()
+        # Safe with WAL: a power cut can lose the last commit, but never corrupts the file
+        await self.connection.execute("PRAGMA synchronous = NORMAL")
         await self.migrate()
         cursor = await self.connection.execute(
             "SELECT 1 FROM sqlite_master WHERE name = 'cr_player_fts'"
@@ -57,6 +66,19 @@ class Database:
             # Players stored before the index existed: index them once (~1-2 min for 10M)
             await self.connection.execute("INSERT INTO cr_player_fts(cr_player_fts) VALUES('rebuild')")
             await self.connection.commit()
+
+    async def use_wal(self) -> None:
+        """Write-ahead logging: readers no longer wait for the crawler's writes and the other
+        way round, only two writers queue. It's stored in the file, so this only matters once."""
+        assert self.connection is not None
+        cursor = await self.connection.execute("PRAGMA journal_mode")
+        if (await cursor.fetchone())[0] == "wal":
+            return
+        try:
+            await self.connection.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.OperationalError as e:
+            # Switching needs nobody else using the file, the next connect tries again
+            await log.warning(f"Couldn't switch the database to WAL mode yet: {e}")
 
     async def migrate(self) -> None:
         """Adds columns to tables created before them, CREATE TABLE IF NOT EXISTS doesn't."""
