@@ -10,6 +10,22 @@ CREATE TABLE IF NOT EXISTS guild_image_channel(
   FOREIGN KEY(guild_id) REFERENCES guild(guild_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS playlist(
+  playlist_id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  name TEXT NOT NULL COLLATE NOCASE,
+  UNIQUE(user_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS playlist_track(
+  track_id INTEGER PRIMARY KEY,
+  playlist_id INTEGER NOT NULL,
+  url TEXT NOT NULL,
+  title TEXT,
+  author TEXT,
+  FOREIGN KEY(playlist_id) REFERENCES playlist(playlist_id) ON DELETE CASCADE
+);
+
 -- Clash Royale players collected by src/crawl_players.py, used for deck search by name
 CREATE TABLE IF NOT EXISTS cr_player(
   tag TEXT PRIMARY KEY,

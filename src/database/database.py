@@ -90,6 +90,56 @@ class Database:
             if columns and column not in columns:
                 await self.connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
         await self.connection.commit()
+        await self.migrate_playlist_names()
+
+    async def migrate_playlist_names(self) -> None:
+        """Early versions created playlist.name without COLLATE NOCASE, so "Chill" and "chill"
+        could both exist and lookups were case-sensitive. Rebuilds the table with the current
+        definition, keeping every playlist's id (and so its tracks)."""
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'playlist'"
+        )
+        row = await cursor.fetchone()
+        if row is None or "NOCASE" in row[0].upper():
+            return
+
+        # Names that only differ by case would break the new UNIQUE, rename the later ones
+        cursor = await self.connection.execute(
+            "SELECT playlist_id, user_id, name FROM playlist ORDER BY playlist_id"
+        )
+        taken: set[tuple[int, str]] = set()
+        for playlist_id, user_id, name in await cursor.fetchall():
+            new_name, n = name, 2
+            while (user_id, new_name.lower()) in taken:
+                new_name, n = f"{name} ({n})", n + 1
+            taken.add((user_id, new_name.lower()))
+            if new_name != name:
+                await self.connection.execute(
+                    "UPDATE playlist SET name = ? WHERE playlist_id = ?", (new_name, playlist_id)
+                )
+        await self.connection.commit()
+
+        # Foreign keys off while swapping tables, so tracks aren't cascade-deleted with the old one
+        await self.connection.execute("PRAGMA foreign_keys = OFF")
+        await self.connection.executescript(
+            """
+            BEGIN;
+            CREATE TABLE playlist_new(
+              playlist_id INTEGER PRIMARY KEY,
+              user_id INTEGER NOT NULL,
+              name TEXT NOT NULL COLLATE NOCASE,
+              UNIQUE(user_id, name)
+            );
+            INSERT INTO playlist_new(playlist_id, user_id, name)
+              SELECT playlist_id, user_id, name FROM playlist;
+            DROP TABLE playlist;
+            ALTER TABLE playlist_new RENAME TO playlist;
+            COMMIT;
+            """
+        )
+        await self.connection.execute("PRAGMA foreign_keys = ON")
+        await log.info("Rebuilt the playlist table so playlist names are case-insensitive")
 
     async def add_guild(self, guild: discord.Guild) -> None:
         assert self.connection is not None
@@ -156,6 +206,86 @@ class Database:
         )
         row = await cursor.fetchone()
         return row is not None
+
+    async def create_playlist(self, user: discord.abc.User, name: str) -> bool:
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "INSERT OR IGNORE INTO playlist(user_id, name) VALUES(?, ?)",
+            (user.id, name),
+        )
+        await self.connection.commit()
+        return cursor.rowcount > 0
+
+    async def get_playlists(self, user: discord.abc.User) -> list[str]:
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "SELECT name \
+            FROM playlist \
+            WHERE user_id = ? \
+            ORDER BY name",
+            (user.id,),
+        )
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+
+    async def get_playlist_id(self, user: discord.abc.User, name: str) -> int | None:
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "SELECT playlist_id \
+            FROM playlist \
+            WHERE user_id = ? AND name = ?",
+            (user.id, name),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def add_playlist_tracks(
+        self, playlist_id: int, tracks: list[tuple[str, str, str]]
+    ) -> None:
+        """tracks is a list of (url, title, author)."""
+        assert self.connection is not None
+        await self.connection.executemany(
+            "INSERT INTO playlist_track(playlist_id, url, title, author) VALUES(?, ?, ?, ?)",
+            [(playlist_id, *track) for track in tracks],
+        )
+        await self.connection.commit()
+
+    async def get_playlist_urls(self, playlist_id: int) -> list[str]:
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "SELECT url \
+            FROM playlist_track \
+            WHERE playlist_id = ? \
+            ORDER BY track_id",
+            (playlist_id,),
+        )
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+
+    async def get_playlist_summaries(self, user: discord.abc.User) -> list[tuple[str, int]]:
+        """Returns (name, track count) for each of the user's playlists."""
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "SELECT p.name, COUNT(t.track_id) \
+            FROM playlist p \
+            LEFT JOIN playlist_track t ON t.playlist_id = p.playlist_id \
+            WHERE p.user_id = ? \
+            GROUP BY p.playlist_id \
+            ORDER BY p.name",
+            (user.id,),
+        )
+        rows = await cursor.fetchall()
+        return [(row[0], row[1]) for row in rows]
+
+    async def delete_playlist(self, user: discord.abc.User, name: str) -> bool:
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "DELETE FROM playlist \
+            WHERE user_id = ? AND name = ?",
+            (user.id, name),
+        )
+        await self.connection.commit()
+        return cursor.rowcount > 0
 
     async def get_players_by_name(
         self, search_name: str, limit: int
