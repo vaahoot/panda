@@ -56,7 +56,7 @@ docker compose up --build -d
 ## Player database crawler
 `src/crawl_players.py` fills the `cr_player` table in `data/bot.db` with player tags, names and clan names from the official API, so players can be found by name without scraping. It starts from clan rankings and clan search in every location, then crawls clan member lists and battle logs. It can be stopped at any time and picks up where it left off when run again.
 
-It has its own container, which only starts when you ask for it and runs until stopped. It runs with `--forever --refresh-days 7`: clans that haven't been checked for 7 days are re-crawled first (updating names and clans and clearing players who left), and the rest of the time it crawls new players:
+It has its own container, which only starts when you ask for it and runs until stopped. It runs with `--forever --refresh-days 3`: clans that haven't been checked for 3 days are re-crawled first (updating names and clans and clearing players who left), and the rest of the time it crawls new players:
 
 ```bash
 docker compose up -d crawler
