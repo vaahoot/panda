@@ -199,7 +199,8 @@ async def save_player_from_battle_log(db: Database, tag: str, battles: list[dict
             return
 
 
-async def find_deck(db: Database, name: str, clan: str | None) -> list[dict[str, str]] | None:
+async def find_deck(db: Database, name: str, clan: str | None) -> dict[str, list[dict]] | None:
+    """The player's latest decks by mode (see get_deck.get_last_decks), None if not found."""
     tag = await find_tag(db, name, clan)
     if not tag:
         await log.info(f"Player {name} not found")
@@ -211,4 +212,4 @@ async def find_deck(db: Database, name: str, clan: str | None) -> list[dict[str,
         await save_player_from_battle_log(db, tag, data)
     except sqlite3.OperationalError as e:
         await log.warning(f"Couldn't save player {tag}: {e}")
-    return await get_deck.get_last_deck(data)
+    return await get_deck.get_last_decks(data)

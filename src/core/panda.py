@@ -1,3 +1,4 @@
+import io
 import time
 
 import aiohttp.client_exceptions
@@ -11,6 +12,7 @@ import log
 import net
 from clash import claude, screenshots
 from clash.deck import generate_image
+from clash.deck import views as deck_views
 from clash.scraping import search
 from config import paths, settings, tokens
 
@@ -153,22 +155,29 @@ class Panda(commands.Bot):
         channel = message.channel
 
         async with channel.typing():
-            deck = await search.find_deck(self.db, name, clan)
+            decks = await search.find_deck(self.db, name, clan)
 
-            if not deck:
+            if not decks:
                 embed = discord.Embed(title="No deck Found", color=settings.ERROR_COLOR)
                 embed.add_field(name="Name", value=name, inline=False)
                 embed.add_field(name="Clan", value=clan, inline=False)
                 await message.reply(embed=embed)
                 return
 
-            await log.info(f"Found deck for {name}: {[card['name'] for card in deck]}")
-            buffer = await generate_image.build_deck_image(deck)
+            for deck_mode, deck in decks.items():
+                await log.info(f"Found {deck_mode} deck for {name}: {[card['name'] for card in deck]}")
+            mode = deck_views.first_mode(decks)
+            image = (await generate_image.build_deck_image(decks[mode])).getvalue()
 
-        await message.reply(
-            f"Name: {name}\nClan: {clan}",
-            file=discord.File(buffer, filename="deck.png"),
-        )
+        content = deck_views.deck_message(name, clan)
+        file = discord.File(io.BytesIO(image), filename=deck_views.DECK_IMAGE_FILENAME)
+        if len(decks) == 1:
+            await message.reply(content, file=file)
+        else:
+            # Both ranked and ladder decks: show ranked, with a menu to switch
+            view = deck_views.DeckModeView(decks, mode, image)
+            view.message = await message.reply(content, file=file, view=view)
+            view.prebuild()
 
         time_taken = time.time() - start
         await log.info(f"Search by info took {time_taken:.2f}s")

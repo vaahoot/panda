@@ -71,29 +71,37 @@ async def fetch_card_image(card: dict, key: str) -> Image.Image:
     return await fetch_image(url, card_image_file(card.get("id", "unknown"), key, url))
 
 
-async def get_last_deck(data: list[dict] | None) -> list[dict[str, str]] | None:
-    if not data:
-        return None
+RANKED = "Ranked"
+LADDER = "Ladder"
 
-    last_battle = {}
-    for battle in data:
-        if battle.get("type") == "pathOfLegend":
-            last_battle = battle
-            break
 
-    if not last_battle:
-        for battle in data:
-            if battle.get("type") == "PvP":
-                last_battle = battle
-                break
+def is_ranked(battle: dict) -> bool:
+    return battle.get("type") == "pathOfLegend"
 
-    if not last_battle:
-        return None
 
-    team = last_battle["team"][0]
-    cards = team["cards"]
+def is_ladder(battle: dict) -> bool:
+    # Ladder games come as type "PvP" or "trail", and "trail" also covers events (draft,
+    # showdown, event decks) whose decks aren't the player's own. The game mode tells them apart
+    return (battle.get("gameMode") or {}).get("name") == "Ladder"
 
-    return list(await asyncio.gather(*(get_card_info(card) for card in cards)))
+
+# Ranked first: that's the deck shown first when a player has both
+DECK_MODES = {RANKED: is_ranked, LADDER: is_ladder}
+
+
+async def get_last_decks(data: list[dict] | None) -> dict[str, list[dict]]:
+    """The deck of the most recent battle of each mode, ranked first. Modes without a battle
+    in the log are left out, so an empty dict means there's no deck to show."""
+    battles = {}
+    for mode, matches in DECK_MODES.items():
+        battle = next((b for b in data or [] if matches(b)), None)
+        if battle is not None:
+            battles[mode] = battle["team"][0]["cards"]
+
+    decks = await asyncio.gather(
+        *(asyncio.gather(*(get_card_info(card) for card in cards)) for cards in battles.values())
+    )
+    return {mode: list(deck) for mode, deck in zip(battles, decks)}
 
 
 async def get_card_info(card: dict) -> dict:
