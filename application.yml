@@ -23,9 +23,9 @@ lavalink:
       local: false
 
   plugins:
-    - dependency: "com.github.lavalink-devs.youtube-source:youtube-plugin:1.18.2"
-      repository: "https://jitpack.io" # maven.lavalink.dev serves directory pages instead of jars
-      snapshot: false
+    - dependency: "dev.lavalink.youtube:youtube-plugin:f45bbb7aebfcbc1c553769e04af6cd43afa8b7c3"
+      repository: "https://maven.lavalink.dev/snapshots"
+      snapshot: true
     - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.3"
       repository: "https://jitpack.io" # maven.lavalink.dev stopped serving lavasrc
       snapshot: false
