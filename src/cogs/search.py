@@ -9,8 +9,6 @@ class Search(commands.Cog, name="🔎 Search"):
     def __init__(self, bot: core.Panda):
         self.bot: core.Panda = bot
 
-    # TODO: Implement new syntax where !d name     means any clan
-    #                                  !d name,    means no clan
     @commands.cooldown(rate=3, per=60, type=commands.BucketType.user)
     @commands.command(aliases=["d", "D"], brief="Find a deck by nickname and clan")
     async def deck(self, ctx: commands.Context, *, query: str | None = None):
@@ -18,7 +16,8 @@ class Search(commands.Cog, name="🔎 Search"):
 
         Both arguments can be partial matches if you can't enter some of the characters from either.
 
-        Note that if clan is not given only players with no clan will be searched.
+        `!deck name` - the player has no clan (unless only one player has that name).
+        `!deck name, .` - the player is in a clan, but you don't know which.
 
         Example: `!deck Ijihu, Lifetime`
         """
@@ -30,7 +29,8 @@ class Search(commands.Cog, name="🔎 Search"):
 
         if len(args) == 2:
             name = args[0].strip()
-            clan = args[1].strip()
+            # "name," with nothing after the comma counts as no clan
+            clan = args[1].strip() or None
         elif len(args) == 1:
             name = args[0].strip()
             clan = None

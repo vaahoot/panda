@@ -148,15 +148,27 @@ async def search_player_in_clans(data: dict, name: str) -> str | None:
 
 
 DB_SEARCH_LIMIT = 1000
+# `!d name, .` - the player is in some clan, but which one doesn't matter
+ANY_CLAN = "."
 DB_CLAN_MEMBERS_LIMIT = 5000
 
 
 def pick_clanless(rows: list[tuple[str, str | None]]) -> str | None:
-    """With no clan given: the only player, or the only one without a clan."""
+    """No clan given: the only player, otherwise the oldest entry without a clan (rows come
+    oldest first)."""
     if len(rows) == 1:
         return rows[0][0]
     clanless = [tag for tag, clan_name in rows if not clan_name]
-    return clanless[0] if len(clanless) == 1 else None
+    return clanless[0] if clanless else None
+
+
+def pick_any_clan(rows: list[tuple[str, str | None]]) -> str | None:
+    """Clan given as ".": the only player, otherwise the oldest entry that is in a clan
+    (a player without one is never picked over others)."""
+    if len(rows) == 1:
+        return rows[0][0]
+    with_clan = [tag for tag, clan_name in rows if clan_name]
+    return with_clan[0] if with_clan else None
 
 
 # Closest first. Names cut off in a screenshot lose their end, so "starts with" beats "contains"
@@ -184,22 +196,24 @@ async def find_tag_in_database(db: Database, name: str, clan: str | None) -> str
         # An empty key is a substring of every name
         return None
 
-    # The name alone is enough when only one stored player has it
+    # Whole-name matches first, names containing it only when nobody has the exact name.
+    # Both lists are oldest first, so even a capped list starts with the oldest matches
     exact = await db.get_players_by_exact_name(name, DB_SEARCH_LIMIT)
+    containing = await db.get_players_by_name(name, DB_SEARCH_LIMIT)
+    matches = [(tag, clan_name) for tag, clan_name, _ in (exact or containing)]
+
+    if clan == ANY_CLAN:
+        return pick_any_clan(matches)
+    if not clan:
+        return pick_clanless(matches)
+
+    # The name alone is enough when only one stored player has it
     if len(exact) == 1:
         return exact[0][0]
-    containing = await db.get_players_by_name(name, DB_SEARCH_LIMIT)
     if not exact and len(containing) == 1:
         return containing[0][0]
 
-    clan = normalise(clan) if clan else ""
-    if not clan:
-        if exact:
-            return pick_clanless([(tag, clan_name) for tag, clan_name, _ in exact])
-        if len(containing) >= DB_SEARCH_LIMIT:
-            # A capped result may be missing the right player
-            return None
-        return pick_clanless([(tag, clan_name) for tag, clan_name, _ in containing])
+    clan = normalise(clan)
 
     # Players matching the name, plus members of clans matching the clan. The second half
     # still finds common names whose matches didn't all fit in the name results
@@ -238,7 +252,7 @@ async def find_tag(db: Database, name: str, clan: str | None) -> str | None:
         await log.info(f"Found player in database. Tag: {tag}")
         return tag
 
-    if clan:
+    if clan and clan != ANY_CLAN:
         tag = await find_tag_by_clan(name, clan)
         if tag:
             await log.info(f"Found player by clan. Tag: {tag}")

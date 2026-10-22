@@ -357,7 +357,8 @@ class Database:
     async def get_players_by_name(
         self, search_name: str, limit: int
     ) -> list[tuple[str, str | None, str]]:
-        """Returns (tag, clan name, search name) of stored players whose normalised name contains search_name."""
+        """Returns (tag, clan name, search name) of stored players whose normalised name contains
+        search_name, oldest entries first."""
         assert self.connection is not None
         if len(search_name) >= 3 and not any(c in search_name for c in "%_"):
             # Trigram index: substring search in milliseconds. It needs 3+ characters, and
@@ -367,6 +368,7 @@ class Database:
                 FROM cr_player_fts f \
                 JOIN cr_player p ON p.rowid = f.rowid \
                 WHERE f.search_name LIKE ? \
+                ORDER BY f.rowid \
                 LIMIT ?",
                 (f"%{search_name}%", limit),
             )
@@ -376,6 +378,7 @@ class Database:
                 "SELECT tag, clan_name, search_name \
                 FROM cr_player \
                 WHERE search_name = ? \
+                ORDER BY rowid \
                 LIMIT ?",
                 (search_name, limit),
             )
@@ -385,12 +388,14 @@ class Database:
     async def get_players_by_exact_name(
         self, search_name: str, limit: int
     ) -> list[tuple[str, str | None, str]]:
-        """Returns (tag, clan name, search name) of stored players whose normalised name is exactly search_name."""
+        """Returns (tag, clan name, search name) of stored players whose normalised name is exactly
+        search_name, oldest entries first."""
         assert self.connection is not None
         cursor = await self.connection.execute(
             "SELECT tag, clan_name, search_name \
             FROM cr_player \
             WHERE search_name = ? \
+            ORDER BY rowid \
             LIMIT ?",
             (search_name, limit),
         )
