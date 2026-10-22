@@ -1,12 +1,14 @@
 import unicodedata
 
-# Accents and overlays (strikethrough, slashes, underlines) people decorate names with.
-# Other scripts' combining marks (Japanese voicing, Thai vowels) are part of the letter, so they stay
+# Accents and overlays (strikethrough, slashes, underlines) people decorate names with, plus
+# Japanese voicing marks: ゛ and ゜ are tiny in the game font and easily misread (ぼ vs ぽ), so
+# ば, ぱ and は all match. Other combining marks (Thai vowels, Indic signs) are part of the letter
 DECORATION_RANGES = (
     (0x0300, 0x036F),  # Combining Diacritical Marks
     (0x1AB0, 0x1AFF),  # Combining Diacritical Marks Extended
     (0x1DC0, 0x1DFF),  # Combining Diacritical Marks Supplement
     (0x20D0, 0x20FF),  # Combining Diacritical Marks for Symbols
+    (0x3099, 0x309A),  # Combining Katakana-Hiragana Voiced / Semi-Voiced Sound Marks
     (0xFE20, 0xFE2F),  # Combining Half Marks
 )
 
@@ -34,7 +36,7 @@ def normalise(text: str) -> str:
         c for c in unicodedata.normalize("NFKD", lowered).translate(LOOKALIKES)
         if not is_decoration(c) and (c.isalnum() or unicodedata.category(c) in ("Mn", "Mc"))
     )
-    # Back to composed form: rejoins Korean syllables and Japanese voiced kana split by NFKD
+    # Back to composed form: rejoins Korean syllables split by NFKD
     key = unicodedata.normalize("NFC", key)
     if key:
         return key
