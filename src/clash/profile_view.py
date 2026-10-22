@@ -34,9 +34,10 @@ def clan_badge(player: dict) -> str:
 
 
 def clan_text(player: dict) -> str:
+    """Empty for players without a clan, the heading says it."""
     clan = player.get("clan")
     if not clan:
-        return "Not in a clan"
+        return ""
     role = CLAN_ROLES.get(player.get("role", ""), "Member")
     return f"{clan['name']} `{clan['tag']}`\n{role}"
 
@@ -91,9 +92,13 @@ class ProfileView(discord.ui.LayoutView):
         tag = player["tag"]
 
         title = discord.ui.TextDisplay(f"## {player['name']}\n`{tag}`")
+        clan = player.get("clan")
 
         stats = [
-            (with_emoji(emojis, clan_badge(player), "Clan"), clan_text(player)),
+            (
+                with_emoji(emojis, clan_badge(player), "Clan" if clan else "No Clan"),
+                clan_text(player),
+            ),
             (with_emoji(emojis, "rank", "Ranked"), rank_text(player, emojis)),
             (with_emoji(emojis, "battle", "Trophy Road"), trophies_text(player, emojis)),
             (with_emoji(emojis, "crownblue", "Win Rate"), winrate_text(player)),
@@ -104,7 +109,6 @@ class ProfileView(discord.ui.LayoutView):
                 label="RoyaleAPI", url=ROYALE_API_PLAYER.format(tag.lstrip("#"))
             )
         )
-        clan = player.get("clan")
         if clan:
             buttons.add_item(
                 discord.ui.Button(
@@ -116,7 +120,10 @@ class ProfileView(discord.ui.LayoutView):
             discord.ui.Container(
                 title,
                 discord.ui.Separator(),
-                *(discord.ui.TextDisplay(f"### {name}\n{value}") for name, value in stats),
+                *(
+                    discord.ui.TextDisplay(f"### {name}\n{value}" if value else f"### {name}")
+                    for name, value in stats
+                ),
                 discord.ui.Separator(),
                 buttons,
                 accent_colour=settings.MAIN_COLOR,
