@@ -232,6 +232,17 @@ async def crawl_clan(api: Api, tag: str) -> tuple[list, list, tuple[str, list[st
     return [clan_row(clan)], players, (tag, [member["tag"] for member in members])
 
 
+async def crawl_profile(api: Api, tag: str) -> tuple[list, list, None]:
+    """Returns (clan rows, player rows, None) from a player's profile: their current name, and
+    their clan if they've joined one since."""
+    player = await api.get(f"/players/{quote(tag)}")
+    if not player:
+        # Gone (deleted or banned): nothing to update, just don't ask again for a while
+        return [], [], None
+    clan = player.get("clan")
+    return ([clan_row(clan)] if clan else []), [player_row(player["tag"], player["name"], clan)], None
+
+
 async def crawl_battlelog(api: Api, tag: str) -> tuple[list, list, None]:
     """Returns (clan rows, player rows, None) for everyone in the player's recent battles."""
     battles = await api.get(f"/players/{quote(tag)}/battlelog")
@@ -256,9 +267,10 @@ async def count(db: aiosqlite.Connection, query: str) -> int:
 
 
 async def clear_leavers(db: aiosqlite.Connection, clan_tag: str, member_tags: list[str]) -> None:
-    """Players stored in the clan but not in its current member list have left it."""
+    """Players stored in the clan but not in its current member list have left it. Their new
+    clan is unknown, so updated_at is cleared and the clanless refresh picks them up first."""
     placeholders = ",".join("?" * len(member_tags))
-    query = "UPDATE cr_player SET clan_tag = NULL, clan_name = NULL WHERE clan_tag = ?"
+    query = "UPDATE cr_player SET clan_tag = NULL, clan_name = NULL, updated_at = NULL WHERE clan_tag = ?"
     if member_tags:
         query += f" AND tag NOT IN ({placeholders})"
     await db.execute(query, (clan_tag, *member_tags))
@@ -294,6 +306,36 @@ async def save_chunk(db: aiosqlite.Connection, chunk: list[tuple[str, tuple]], m
             await clear_leavers(db, *result[2])
     await db.executemany(mark_done, [(now, tag) for tag, _ in chunk])
     await db.commit()
+
+
+CLANLESS = "clan_tag IS NULL AND clan_name IS NULL"
+# Left alone, SQLite reads every NULL clan_tag through cr_player_clan_tag and sorts them
+CLANLESS_INDEX = "cr_player INDEXED BY cr_player_clanless_updated"
+
+
+async def stale_clanless_players(db: aiosqlite.Connection, refresh_before: int) -> list[str]:
+    """Up to BATCH_SIZE clanless players not confirmed since refresh_before. Both queries walk
+    the partial index on updated_at, so they stay fast with tens of millions of players."""
+    cursor = await db.execute(
+        f"SELECT tag FROM {CLANLESS_INDEX} WHERE {CLANLESS} AND updated_at IS NULL LIMIT ?", (BATCH_SIZE,)
+    )
+    tags = [row[0] for row in await cursor.fetchall()]
+    if len(tags) < BATCH_SIZE:
+        cursor = await db.execute(
+            f"SELECT tag FROM {CLANLESS_INDEX} WHERE {CLANLESS} AND updated_at < ? ORDER BY updated_at LIMIT ?",
+            (refresh_before, BATCH_SIZE - len(tags)),
+        )
+        tags += [row[0] for row in await cursor.fetchall()]
+    return tags
+
+
+async def count_stale_clanless_players(db: aiosqlite.Connection, refresh_before: int) -> int:
+    cursor = await db.execute(
+        f"SELECT (SELECT COUNT(*) FROM {CLANLESS_INDEX} WHERE {CLANLESS} AND updated_at IS NULL) \
+        + (SELECT COUNT(*) FROM {CLANLESS_INDEX} WHERE {CLANLESS} AND updated_at < ?)",
+        (refresh_before,),
+    )
+    return (await cursor.fetchone())[0]
 
 
 async def idle(api: Api, seconds: int) -> None:
@@ -340,8 +382,13 @@ async def crawl(
                 (refresh_before, BATCH_SIZE),
             )
             clan_tags = [row[0] for row in await cursor.fetchall()]
-            if not clan_tags and not forever:
-                await log.info(f"Refresh done, every clan was checked in the last {refresh_days:g} days")
+
+        stale_players: list[str] = []
+        if not clan_tags and refresh_before:
+            # Then players without a clan, which no clan refresh covers: unknown first, then oldest
+            stale_players = await stale_clanless_players(db, refresh_before)
+            if not stale_players and not forever:
+                await log.info(f"Refresh done, every clan and clanless player was checked in the last {refresh_days:g} days")
                 return
 
         if clan_tags:
@@ -350,6 +397,13 @@ async def crawl(
             )
             mark_done = "UPDATE cr_clan SET members_checked_at = ? WHERE tag = ?"
             tags = clan_tags
+        elif stale_players:
+            results = await asyncio.gather(
+                *(crawl_profile(api, tag) for tag in stale_players), return_exceptions=True
+            )
+            # Saving the profile already stamps updated_at, this covers players whose profile is gone
+            mark_done = "UPDATE cr_player SET updated_at = ? WHERE tag = ?"
+            tags = stale_players
         else:
             cursor = await db.execute(
                 "SELECT tag FROM cr_player WHERE battlelog_checked_at IS NULL LIMIT ?",
@@ -388,6 +442,7 @@ async def crawl(
                 "SELECT COUNT(*) FROM cr_clan WHERE members_checked_at < ?", (refresh_before,)
             )
             status += f" | clans to refresh: {(await cursor.fetchone())[0]}"
+            status += f" | clanless players to refresh: {await count_stale_clanless_players(db, refresh_before)}"
         await log.info(f"{status} | requests: {api.requests} ({api.rate():.1f}/s) | saved in {save_seconds:.1f}s")
 
         if errors:
@@ -413,7 +468,8 @@ async def main() -> None:
     )
     parser.add_argument(
         "--refresh-days", type=float, default=0,
-        help="also re-crawl clans not checked in this many days (updates names/clans, clears leavers), "
+        help="also re-crawl clans not checked in this many days (updates names/clans, clears leavers) "
+        "and re-check players without a clan not confirmed in that time, "
         "then stop instead of moving on to battle logs (unless --forever)",
     )
     args = parser.parse_args()

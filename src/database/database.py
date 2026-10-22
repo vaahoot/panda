@@ -11,14 +11,17 @@ from config.settings import DEFAULT_PREFIX
 
 BUSY_TIMEOUT_SECONDS = 30
 
-# Keeps battlelog_checked_at so the crawler's progress isn't reset by updates
+# Keeps battlelog_checked_at so the crawler's progress isn't reset by updates. Every save
+# confirms the name and clan, so it also stamps updated_at
 UPSERT_PLAYER = """
-    INSERT INTO cr_player(tag, name, clan_tag, clan_name, search_name) VALUES(?, ?, ?, ?, ?)
+    INSERT INTO cr_player(tag, name, clan_tag, clan_name, search_name, updated_at)
+    VALUES(?, ?, ?, ?, ?, unixepoch())
     ON CONFLICT(tag) DO UPDATE SET
         name = excluded.name,
         clan_tag = excluded.clan_tag,
         clan_name = excluded.clan_name,
-        search_name = excluded.search_name
+        search_name = excluded.search_name,
+        updated_at = excluded.updated_at
 """
 
 UPSERT_CLAN = """
@@ -32,6 +35,7 @@ UPSERT_CLAN = """
 ADDED_COLUMNS = [
     ("cr_player", "clan_tag", "TEXT"),
     ("cr_clan", "search_name", "TEXT"),
+    ("cr_player", "updated_at", "INTEGER"),
 ]
 
 

@@ -40,12 +40,15 @@ CREATE TABLE IF NOT EXISTS cr_player(
   clan_tag TEXT,                 -- NULL = no clan, or left the clan it was last seen in
   clan_name TEXT,
   search_name TEXT NOT NULL,     -- normalise(name), letters and digits only, for lookups
-  battlelog_checked_at INTEGER   -- unix time, NULL = battle log not crawled yet
+  battlelog_checked_at INTEGER,  -- unix time, NULL = battle log not crawled yet
+  updated_at INTEGER             -- unix time name/clan were last confirmed, NULL = unknown or left a clan
 );
 
 CREATE INDEX IF NOT EXISTS cr_player_search_name ON cr_player(search_name);
 CREATE INDEX IF NOT EXISTS cr_player_pending ON cr_player(tag) WHERE battlelog_checked_at IS NULL;
 CREATE INDEX IF NOT EXISTS cr_player_clan_tag ON cr_player(clan_tag);
+-- Clanless players by how stale they are, for the crawler's refresh (clan members are refreshed with their clan)
+CREATE INDEX IF NOT EXISTS cr_player_clanless_updated ON cr_player(updated_at) WHERE clan_tag IS NULL AND clan_name IS NULL;
 
 -- Trigram index over search_name for fast substring search (LIKE '%...%' with 3+ characters).
 -- It points at cr_player rows by rowid. VACUUM can renumber those, so after a VACUUM run:
