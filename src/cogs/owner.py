@@ -1,8 +1,30 @@
+import pathlib
+import sys
+
 import discord
 from discord.ext import commands
 
 import core
+from config import paths
 from config.settings import MAIN_COLOR
+
+# Never re-imported on reload: the entry point, and modules holding state the running bot uses
+# (the bot class, the database, the shared HTTP session)
+PINNED_MODULES = ("__main__", "main", "core", "database", "net")
+
+
+def forget_bot_modules() -> None:
+    """Drops the bot's own modules from the import cache, so a reloaded cog imports their
+    current code instead of what was loaded at startup. Cogs themselves are left to
+    reload_extension."""
+    for name, module in list(sys.modules.items()):
+        file = getattr(module, "__file__", None)
+        if not file or not pathlib.Path(file).is_relative_to(paths.SRC):
+            continue
+        top = name.split(".")[0]
+        if top == "cogs" or top in PINNED_MODULES:
+            continue
+        del sys.modules[name]
 
 
 class Owner(commands.Cog, name="🐼 Owner"):
@@ -35,6 +57,7 @@ class Owner(commands.Cog, name="🐼 Owner"):
     @commands.command()
     @commands.is_owner()
     async def reload(self, ctx: commands.Context, cog: str):
+        forget_bot_modules()
         await self.bot.reload_extension(f"cogs.{cog}")
         await ctx.reply(f"Reloaded {cog}")
 
