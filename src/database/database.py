@@ -90,46 +90,60 @@ class Database:
             if columns and column not in columns:
                 await self.connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
         await self.connection.commit()
-        await self.migrate_playlist_names()
+        await self.migrate_playlist_table()
 
-    async def migrate_playlist_names(self) -> None:
-        """Early versions created playlist.name without COLLATE NOCASE, so "Chill" and "chill"
-        could both exist and lookups were case-sensitive. Rebuilds the table with the current
-        definition, keeping every playlist's id (and so its tracks)."""
+    async def migrate_playlist_table(self) -> None:
+        """Rebuilds playlist tables created by older versions with the current definition,
+        keeping every playlist's id (and so its tracks):
+        - early versions created playlist.name without COLLATE NOCASE, so "Chill" and "chill"
+          could both exist and lookups were case-sensitive
+        - playlist.user_id didn't reference discord_user before that table existed"""
         assert self.connection is not None
         cursor = await self.connection.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'playlist'"
         )
         row = await cursor.fetchone()
-        if row is None or "NOCASE" in row[0].upper():
+        if row is None:
+            return
+        definition = row[0].upper()
+        case_sensitive = "NOCASE" not in definition
+        if not case_sensitive and "REFERENCES DISCORD_USER" in definition:
             return
 
-        # Names that only differ by case would break the new UNIQUE, rename the later ones
-        cursor = await self.connection.execute(
-            "SELECT playlist_id, user_id, name FROM playlist ORDER BY playlist_id"
-        )
-        taken: set[tuple[int, str]] = set()
-        for playlist_id, user_id, name in await cursor.fetchall():
-            new_name, n = name, 2
-            while (user_id, new_name.lower()) in taken:
-                new_name, n = f"{name} ({n})", n + 1
-            taken.add((user_id, new_name.lower()))
-            if new_name != name:
-                await self.connection.execute(
-                    "UPDATE playlist SET name = ? WHERE playlist_id = ?", (new_name, playlist_id)
-                )
-        await self.connection.commit()
+        if case_sensitive:
+            # Names that only differ by case would break the new UNIQUE, rename the later ones
+            cursor = await self.connection.execute(
+                "SELECT playlist_id, user_id, name FROM playlist ORDER BY playlist_id"
+            )
+            taken: set[tuple[int, str]] = set()
+            for playlist_id, user_id, name in await cursor.fetchall():
+                new_name, n = name, 2
+                while (user_id, new_name.lower()) in taken:
+                    new_name, n = f"{name} ({n})", n + 1
+                taken.add((user_id, new_name.lower()))
+                if new_name != name:
+                    await self.connection.execute(
+                        "UPDATE playlist SET name = ? WHERE playlist_id = ?", (new_name, playlist_id)
+                    )
+            await self.connection.commit()
 
         # Foreign keys off while swapping tables, so tracks aren't cascade-deleted with the old one
         await self.connection.execute("PRAGMA foreign_keys = OFF")
         await self.connection.executescript(
             """
             BEGIN;
+            CREATE TABLE IF NOT EXISTS discord_user(
+              user_id INTEGER PRIMARY KEY,
+              cr_tag TEXT
+            );
+            -- Every playlist owner needs a row for the new foreign key
+            INSERT OR IGNORE INTO discord_user(user_id) SELECT DISTINCT user_id FROM playlist;
             CREATE TABLE playlist_new(
               playlist_id INTEGER PRIMARY KEY,
               user_id INTEGER NOT NULL,
               name TEXT NOT NULL COLLATE NOCASE,
-              UNIQUE(user_id, name)
+              UNIQUE(user_id, name),
+              FOREIGN KEY(user_id) REFERENCES discord_user(user_id) ON DELETE CASCADE
             );
             INSERT INTO playlist_new(playlist_id, user_id, name)
               SELECT playlist_id, user_id, name FROM playlist;
@@ -139,7 +153,7 @@ class Database:
             """
         )
         await self.connection.execute("PRAGMA foreign_keys = ON")
-        await log.info("Rebuilt the playlist table so playlist names are case-insensitive")
+        await log.info("Rebuilt the playlist table with the current definition")
 
     async def add_guild(self, guild: discord.Guild) -> None:
         assert self.connection is not None
@@ -207,8 +221,36 @@ class Database:
         row = await cursor.fetchone()
         return row is not None
 
+    async def add_user(self, user: discord.abc.User) -> None:
+        """Rows that reference a user (playlists) need the user stored first. Doesn't commit."""
+        assert self.connection is not None
+        await self.connection.execute(
+            "INSERT OR IGNORE INTO discord_user(user_id) VALUES(?)", (user.id,)
+        )
+
+    async def set_cr_tag(self, user: discord.abc.User, tag: str) -> None:
+        assert self.connection is not None
+        await self.connection.execute(
+            "INSERT INTO discord_user(user_id, cr_tag) VALUES(?, ?) \
+            ON CONFLICT(user_id) DO UPDATE SET cr_tag = excluded.cr_tag",
+            (user.id, tag),
+        )
+        await self.connection.commit()
+
+    async def get_cr_tag(self, user: discord.abc.User) -> str | None:
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "SELECT cr_tag \
+            FROM discord_user \
+            WHERE user_id = ?",
+            (user.id,),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
     async def create_playlist(self, user: discord.abc.User, name: str) -> bool:
         assert self.connection is not None
+        await self.add_user(user)
         cursor = await self.connection.execute(
             "INSERT OR IGNORE INTO playlist(user_id, name) VALUES(?, ?)",
             (user.id, name),
@@ -398,3 +440,23 @@ class Database:
             # So the crawler picks up the rest of the clan and keeps it refreshed
             await self.connection.execute(UPSERT_CLAN, (clan_tag, clan_name, normalise(clan_name)))
         await self.connection.commit()
+
+    async def add_player_if_missing(
+        self, tag: str, name: str, clan_tag: str | None, clan_name: str | None
+    ) -> bool:
+        """Stores a player (and their clan) only if the player isn't stored yet, so the
+        crawler's newer data is never overwritten. Returns whether the player was added."""
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "INSERT OR IGNORE INTO cr_player(tag, name, clan_tag, clan_name, search_name) \
+            VALUES(?, ?, ?, ?, ?)",
+            (tag, name, clan_tag, clan_name, normalise(name)),
+        )
+        added = cursor.rowcount > 0
+        if added and clan_tag and clan_name:
+            await self.connection.execute(
+                "INSERT OR IGNORE INTO cr_clan(tag, name, search_name) VALUES(?, ?, ?)",
+                (clan_tag, clan_name, normalise(clan_name)),
+            )
+        await self.connection.commit()
+        return added

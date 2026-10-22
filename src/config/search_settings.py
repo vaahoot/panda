@@ -13,6 +13,7 @@ ROYALE_API_PLAYER_SEARCH = "https://royaleapi.com/player/search/results?q={0}"
 # CR_API_BASE=https://api.clashroyale.com/v1 with keys allowed for that IP to skip the proxy
 CR_API_PROXY = "https://proxy.royaleapi.dev/v1"
 CR_API_BASE = (os.getenv("CR_API_BASE") or CR_API_PROXY).rstrip("/")
+CR_API_PLAYER = CR_API_BASE + "/players/{0}"
 CR_API_BATTLE_LOG = CR_API_BASE + "/players/{0}/battlelog"
 CR_API_CLAN_MEMBERS = CR_API_BASE + "/clans/{0}/members"
 CR_API_CLAN_SEARCH = CR_API_BASE + "/clans?name={0}&limit=30"

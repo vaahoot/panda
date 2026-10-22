@@ -62,6 +62,7 @@ class Panda(commands.Bot):
         await self.load_extension("cogs.settings")
         await self.load_extension("cogs.support")
         await self.load_extension("cogs.music")
+        await self.load_extension("cogs.royale")
 
         # FlareSolverr's Cloudflare warm-up takes a while, so don't make startup wait for it.
         # Only RoyaleAPI name scraping needs it, the other searches work straight away

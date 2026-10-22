@@ -10,11 +10,18 @@ CREATE TABLE IF NOT EXISTS guild_image_channel(
   FOREIGN KEY(guild_id) REFERENCES guild(guild_id) ON DELETE CASCADE
 );
 
+-- Discord users. "user" is a keyword in most SQL dialects, hence the prefix
+CREATE TABLE IF NOT EXISTS discord_user(
+  user_id INTEGER PRIMARY KEY,
+  cr_tag TEXT                    -- their Clash Royale player tag, e.g. #2PP, NULL = not set
+);
+
 CREATE TABLE IF NOT EXISTS playlist(
   playlist_id INTEGER PRIMARY KEY,
   user_id INTEGER NOT NULL,
   name TEXT NOT NULL COLLATE NOCASE,
-  UNIQUE(user_id, name)
+  UNIQUE(user_id, name),
+  FOREIGN KEY(user_id) REFERENCES discord_user(user_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS playlist_track(
