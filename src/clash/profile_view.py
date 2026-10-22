@@ -63,7 +63,8 @@ def rank_text(player: dict, emojis: dict[str, str]) -> str:
         ("currentPathOfLegendSeasonResult", "Current"),
         ("bestPathOfLegendSeasonResult", "Best"),
     ):
-        league = (player.get(key) or {}).get("leagueNumber")
+        result = player.get(key) or {}
+        league = result.get("leagueNumber")
         if not league:
             continue
         if league > len(LEAGUES):
@@ -72,7 +73,15 @@ def rank_text(player: dict, emojis: dict[str, str]) -> str:
         name = LEAGUES[league - 1] if 1 <= league <= len(LEAGUES) else f"League {league}"
         # Subtext (-#) only works for a whole line, so the label goes underneath
         lines.append(f"-# *{label}*")
-        lines.append(with_emoji(emojis, f"league{league}", f"**{name}**", after=True))
+        line = with_emoji(emojis, f"league{league}", f"**{name}**", after=True)
+        details = []
+        if result.get("trophies", 0) > 0:
+            details.append(f"{result['trophies']:,}")
+        if result.get("rank") is not None:
+            details.append(f"#{result['rank']:,}")
+        if details:
+            line += f" ({'  |  '.join(details)})"
+        lines.append(line)
     return "\n".join(lines) or "Unranked"
 
 
