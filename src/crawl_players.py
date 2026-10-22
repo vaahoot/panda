@@ -34,6 +34,8 @@ BATCH_SIZE = 500
 SAVE_CHUNK_PLAYERS = 2000
 # The database is far bigger than SQLite's default ~2MB page cache, this halves save times
 CACHE_SIZE_MB = 256
+# How long --forever waits before checking again when there's nothing to crawl
+IDLE_SECONDS = 300
 MAX_RETRIES = 5
 
 
@@ -294,14 +296,30 @@ async def save_chunk(db: aiosqlite.Connection, chunk: list[tuple[str, tuple]], m
     await db.commit()
 
 
+async def idle(api: Api, seconds: int) -> None:
+    """Sleeps between checks for new work, waking up straight away for a stop."""
+    for _ in range(seconds):
+        if api.stopping:
+            return
+        await asyncio.sleep(1)
+
+
 async def crawl(
-    api: Api, db: aiosqlite.Connection, max_players: int, max_requests: int, refresh_days: float
+    api: Api,
+    db: aiosqlite.Connection,
+    max_players: int,
+    max_requests: int,
+    refresh_days: float,
+    forever: bool,
 ) -> None:
-    refresh_before = int(time.time() - refresh_days * 86400) if refresh_days else None
     # Counting 10M+ rows takes a moment, so it's done once per batch, after saving
     total_players = await count(db, "SELECT COUNT(*) FROM cr_player")
 
     while True:
+        # Recomputed every batch so a run that never ends keeps finding clans as they go stale
+        refresh_before = int(time.time() - refresh_days * 86400) if refresh_days else None
+        if api.stopping:
+            return
         if max_players and total_players >= max_players:
             await log.info(f"Database has {total_players} players, at or above --max-players {max_players} (a total, not players to add), stopping")
             return
@@ -322,7 +340,7 @@ async def crawl(
                 (refresh_before, BATCH_SIZE),
             )
             clan_tags = [row[0] for row in await cursor.fetchall()]
-            if not clan_tags:
+            if not clan_tags and not forever:
                 await log.info(f"Refresh done, every clan was checked in the last {refresh_days:g} days")
                 return
 
@@ -339,8 +357,12 @@ async def crawl(
             )
             player_tags = [row[0] for row in await cursor.fetchall()]
             if not player_tags:
-                await log.info("Nothing left to crawl")
-                return
+                if not forever:
+                    await log.info("Nothing left to crawl")
+                    return
+                await log.info(f"Nothing to crawl right now, checking again in {IDLE_SECONDS // 60} minutes")
+                await idle(api, IDLE_SECONDS)
+                continue
             results = await asyncio.gather(
                 *(crawl_battlelog(api, tag) for tag in player_tags), return_exceptions=True
             )
@@ -385,9 +407,14 @@ async def main() -> None:
     parser.add_argument("--seed-pages", type=int, default=10, help="clan search pages (100 clans each) per location")
     parser.add_argument("--reseed", action="store_true", help="seed again even if clans are already stored")
     parser.add_argument(
+        "--forever", action="store_true",
+        help="never stop on its own: with --refresh-days, refresh stale clans first and crawl new "
+        "players the rest of the time, and wait for new work when there's none",
+    )
+    parser.add_argument(
         "--refresh-days", type=float, default=0,
         help="also re-crawl clans not checked in this many days (updates names/clans, clears leavers), "
-        "then stop instead of moving on to battle logs",
+        "then stop instead of moving on to battle logs (unless --forever)",
     )
     args = parser.parse_args()
 
@@ -408,7 +435,7 @@ async def main() -> None:
         if args.reseed or await count(db, "SELECT COUNT(*) FROM cr_clan") == 0:
             await seed(api, db, args.seed_pages, args.max_players)
         if not api.stopping:
-            await crawl(api, db, args.max_players, args.max_requests, args.refresh_days)
+            await crawl(api, db, args.max_players, args.max_requests, args.refresh_days, args.forever)
     finally:
         await db.close()
         await net.close()
