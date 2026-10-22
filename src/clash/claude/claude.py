@@ -5,6 +5,8 @@ import time
 
 import anthropic
 
+import log
+
 from . import const
 
 
@@ -15,10 +17,13 @@ async def extract_player_info(
     for attempt in range(retries):
         try:
             start = time.time()
-            response = await client.messages.create(
+            response = await client.beta.messages.create(
                 model=const.CLAUDE_DEFAULT_VERSION,
                 max_tokens=128,
                 system=const.CLAUDE_PROMPT,
+                thinking=const.CLAUDE_THINKING,
+                betas=[const.CLAUDE_FALLBACK_BETA],
+                fallbacks="default",
                 messages=[
                     {
                         "role": "user",
@@ -40,15 +45,16 @@ async def extract_player_info(
                 ],
             )
             text_block = next(
-                (
-                    block
-                    for block in response.content
-                    if isinstance(block, anthropic.types.TextBlock)
-                ),
+                (block for block in response.content if block.type == "text"),
                 None,
             )
             total = time.time() - start
             print(f"Time taken for claude to respond: {total:.2f}s")
+
+            if response.stop_reason == "refusal":
+                details = response.stop_details
+                await log.warning(f"Claude declined the screenshot: {details.category if details else 'unknown reason'}")
+                return None
 
             if text_block:
                 return json.loads(text_block.text.strip())

@@ -1,4 +1,10 @@
-CLAUDE_DEFAULT_VERSION = "claude-sonnet-4-6"
+CLAUDE_DEFAULT_VERSION = "claude-sonnet-5-5"
+# Reading two lines off a screenshot needs no reasoning. Sonnet 5.5 can't disable thinking,
+# between_tools turns it off for requests without tool calls (faster, and no thinking tokens)
+CLAUDE_THINKING = {"type": "between_tools"}
+# If Sonnet 5.5 declines in a category it can't handle, the API re-runs the request on
+# another model in the same call instead of returning a refusal
+CLAUDE_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 CLAUDE_PROMPT = """You are analyzing a cropped section of a Clash Royale game screen showing a single player's information. Extract the player name and clan name from the image. The clan name is smaller and appears directly below the player name in a yellowish colour. Return ONLY a valid minified JSON object with no markdown, no explanation, no code blocks: {"name": "player_name", "clan": "clan_name"}
 Rules:
 If no clan is visible, set clan to null
