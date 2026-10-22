@@ -62,6 +62,8 @@ services:
       - SPOTIFY_API_KEY=${SPOTIFY_API_KEY}
     volumes:
       - ./application.yml:/opt/Lavalink/application.yml
+      # Plugin jars are kept in the repo, see application.yml
+      - ./plugins:/opt/Lavalink/plugins:ro
     ports:
       - 127.0.0.1:2333:2333
 

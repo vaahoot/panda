@@ -22,13 +22,8 @@ lavalink:
       http: true
       local: false
 
-  plugins:
-    - dependency: "dev.lavalink.youtube:youtube-plugin:f45bbb7aebfcbc1c553769e04af6cd43afa8b7c3"
-      repository: "https://maven.lavalink.dev/snapshots"
-      snapshot: true
-    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.3"
-      repository: "https://jitpack.io" # maven.lavalink.dev stopped serving lavasrc
-      snapshot: false
+  # Plugins aren't downloaded, docker-compose.yml mounts the jars in plugins/
+  # (youtube-source 2be8e54 and lavasrc 4.8.3). maven.lavalink.dev serves directory pages instead of jars
 
 plugins:
   youtube:
