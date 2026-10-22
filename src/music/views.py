@@ -1,3 +1,4 @@
+import contextlib
 from collections.abc import Awaitable, Callable
 
 import discord
@@ -10,6 +11,23 @@ SELECT_OPTION_LIMIT = 25  # Discord's limit for options in a select menu
 SELECT_TEXT_LIMIT = 100  # Discord's limit for a select option label or description
 
 Track = tuple[int, str | None, str | None]  # (track id, title, author)
+
+
+async def run_pick(
+    select: discord.ui.Select,
+    interaction: discord.Interaction,
+    embed: discord.Embed,
+    action: Awaitable[None],
+) -> None:
+    """Show the "Picked..." embed in place of the menu while action runs, then delete
+    it so only the action's own reply is left."""
+    await interaction.response.edit_message(embed=embed, view=None)
+    select.view.stop()  # type: ignore
+    try:
+        await action
+    finally:
+        with contextlib.suppress(discord.HTTPException):
+            await interaction.delete_original_response()
 
 
 class PlaylistSelect(discord.ui.Select):
@@ -27,9 +45,7 @@ class PlaylistSelect(discord.ui.Select):
         embed = discord.Embed(
             description=f"Picked **{name}**...", color=settings.MAIN_COLOR
         )
-        await interaction.response.edit_message(embed=embed, view=None)
-        self.view.stop()  # type: ignore
-        await self.on_select(name)
+        await run_pick(self, interaction, embed, self.on_select(name))
 
 
 class TrackSelect(discord.ui.Select):
@@ -61,9 +77,7 @@ class TrackSelect(discord.ui.Select):
         embed = discord.Embed(
             description=f"Picked **{title}**...", color=settings.MAIN_COLOR
         )
-        await interaction.response.edit_message(embed=embed, view=None)
-        self.view.stop()  # type: ignore
-        await self.on_select(track_id, title)
+        await run_pick(self, interaction, embed, self.on_select(track_id, title))
 
 
 class PageButton(discord.ui.Button):
