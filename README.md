@@ -16,9 +16,9 @@
 </details>
 
 ## What it does
-This bot uses `RoyaleAPI` and official `Clash Royale API` to find a player by their nickname and clan. Then it outputs the deck they played last, which is likely to be the deck they are playing right now.
+This bot uses the official `Clash Royale API` to find a player by their nickname and clan. Then it outputs the deck they played last, which is likely to be the deck they are playing right now.
 
-I am using Python to scrape RoyaleAPI for nickname/clan search since the official API only lets you find a player by their tag. RoyaleAPI sits behind Cloudflare, so the bot routes its requests through a [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) instance that handles the challenge once and reuses the resulting browser session.
+The official API only lets you look a player up by their tag, so the bot keeps its own database of players (see [Player database crawler](#player-database-crawler)) and searches it by name and clan. If the player isn't stored yet, it falls back to the API's clan search and looks for the name among the members of matching clans.
 The bot expects three API keys in your environment variables:
 
 ```CR_KEY``` - Clash Royale API key.

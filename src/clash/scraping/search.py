@@ -3,7 +3,6 @@ import sqlite3
 import urllib.parse
 
 import aiohttp
-import bs4
 
 import log
 import net
@@ -11,27 +10,6 @@ from clash.deck import get_deck
 from clash.names import normalise
 from config import search_settings
 from database import Database
-
-from . import flaresolverr
-
-
-async def search(link: str, selector: str) -> str:
-    data = await flaresolverr.solve(link)
-
-    if data is None:
-        raise ValueError()
-
-    solution = data.get("solution") or {}
-    html = solution.get("response", "")
-    soup = bs4.BeautifulSoup(html, "html.parser")
-    element = soup.select_one(selector)
-    return element.decode_contents() if element else ""
-
-
-async def search_player_by_name(name: str) -> str:
-    link = search_settings.ROYALE_API_PLAYER_SEARCH.format(urllib.parse.quote(name))
-    search_result_selector = ".player_search_results__container"
-    return await search(link, search_result_selector)
 
 
 async def cr_api_get(url: str):
@@ -52,54 +30,6 @@ async def cr_api_get(url: str):
 async def search_clans_by_name(clan: str) -> dict:
     endpoint = search_settings.CR_API_CLAN_SEARCH.format(urllib.parse.quote(clan))
     return await cr_api_get(endpoint)
-
-
-def parse_players(html: str) -> list[dict]:
-    soup = bs4.BeautifulSoup(html, "html.parser")
-    results = soup.find_all("div", class_="player_search_results__result_container")
-
-    players = []
-    for result in results:
-        header = result.find("a", class_="header")
-        player_tag = result.find("div", class_="player_tag")
-
-        name = header.text.strip() if header else None
-        tag = player_tag.text.strip() if player_tag else None
-
-        clan_and_tag = result.find("a", class_="meta")
-        clan_name = (
-            clan_and_tag.text.strip().split("\xa0\xa0")[0] if clan_and_tag else None
-        )
-        clan_tag = (
-            clan_and_tag.text.strip().split("\xa0\xa0")[1] if clan_and_tag else None
-        )
-
-        if name:
-            name = normalise(name)
-        if clan_name:
-            clan_name = normalise(clan_name)
-
-        players.append(
-            {"name": name, "tag": tag, "clan": clan_name, "clan_tag": clan_tag}
-        )
-
-    return players
-
-
-def find_player_tag(players: list[dict], clan: str | None) -> str | None:
-    if len(players) == 1:
-        return players[0]["tag"]
-    if not clan:
-        for player in players:
-            if not player["clan"]:
-                return player["tag"]
-
-    else:
-        for player in players:
-            if player["clan"] and normalise(clan) in player["clan"]:
-                return player["tag"]
-
-    return None
 
 
 async def get_battle_log(tag: str) -> list[dict]:
@@ -230,12 +160,6 @@ async def find_tag_in_database(db: Database, name: str, clan: str | None) -> str
     return pick_by_name_and_clan(candidates, name, clan)
 
 
-async def find_tag_by_name(name: str, clan: str | None) -> str | None:
-    search_players = await search_player_by_name(name)
-    players = parse_players(search_players)
-    return find_player_tag(players, clan)
-
-
 async def find_tag_by_clan(name: str, clan: str) -> str | None:
     clans = await search_clans_by_name(clan)
     return await search_player_in_clans(clans, name)
@@ -258,10 +182,7 @@ async def find_tag(db: Database, name: str, clan: str | None) -> str | None:
             await log.info(f"Found player by clan. Tag: {tag}")
             return tag
 
-    tag = await find_tag_by_name(name, clan)
-    if tag:
-        await log.info(f"Found player by name. Tag: {tag}")
-    return tag
+    return None
 
 
 async def save_player_from_battle_log(db: Database, tag: str, battles: list[dict]) -> None:

@@ -7,7 +7,6 @@ services:
       - .env
 
     environment:
-      - FLARESOLVERR_URL=http://flaresolverr:8191/v1
       - LAVALINK_URL=lavalink:2333
 
     volumes:
@@ -16,7 +15,6 @@ services:
       - ./src:/app/src/
 
     depends_on:
-      - flaresolverr
       - lavalink
 
   # Fills the player database and keeps it fresh: re-checks every clan every 3 days and crawls
@@ -39,17 +37,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./src:/app/src/
-
-  flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:latest
-    restart: unless-stopped
-    ports:
-      - 127.0.0.1:8191:8191
-    environment:
-      - LOG_LEVEL=info
-      - PROXY_URL=${PROXY_URL}
-      - PROXY_USERNAME=${PROXY_USERNAME}
-      - PROXY_PASSWORD=${PROXY_PASSWORD}
 
   lavalink:
     image: ghcr.io/lavalink-devs/lavalink:4
