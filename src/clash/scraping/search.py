@@ -185,18 +185,34 @@ async def find_tag(db: Database, name: str, clan: str | None) -> str | None:
     return None
 
 
-async def save_player_from_battle_log(db: Database, tag: str, battles: list[dict]) -> None:
-    """Stores the player's current name and clan, taken from their latest battle."""
+def find_player_in_battle_log(tag: str, battles: list[dict]) -> dict | None:
+    """The player's entry from their latest battle, with their current name and clan."""
     # Scraped tags may come without the '#' or in a different case
     wanted = tag.lstrip("#").upper()
     for battle in battles:
         for participant in battle.get("team", []):
-            if participant.get("tag", "").lstrip("#").upper() != wanted or not participant.get("name"):
-                continue
-            clan = participant.get("clan") or {}
-            name = participant["name"]
-            await db.save_player(participant["tag"], name, clan.get("tag"), clan.get("name"), normalise(name))
-            return
+            if participant.get("tag", "").lstrip("#").upper() == wanted and participant.get("name"):
+                return participant
+    return None
+
+
+async def save_player_from_battle_log(db: Database, tag: str, battles: list[dict]) -> None:
+    """Stores the player's current name and clan, taken from their latest battle."""
+    participant = find_player_in_battle_log(tag, battles)
+    if participant is None:
+        return
+    clan = participant.get("clan") or {}
+    name = participant["name"]
+    await db.save_player(participant["tag"], name, clan.get("tag"), clan.get("name"), normalise(name))
+
+
+async def decks_from_battle_log(db: Database, tag: str, battles: list[dict]) -> dict[str, list[dict]]:
+    # Adds players found by the fallback searches and refreshes stale names/clans
+    try:
+        await save_player_from_battle_log(db, tag, battles)
+    except sqlite3.OperationalError as e:
+        await log.warning(f"Couldn't save player {tag}: {e}")
+    return await get_deck.get_last_decks(battles)
 
 
 async def find_deck(db: Database, name: str, clan: str | None) -> dict[str, list[dict]] | None:
@@ -206,10 +222,18 @@ async def find_deck(db: Database, name: str, clan: str | None) -> dict[str, list
         await log.info(f"Player {name} not found")
         return None
 
-    data = await get_battle_log(tag)
-    # Adds players found by the fallback searches and refreshes stale names/clans
+    return await decks_from_battle_log(db, tag, await get_battle_log(tag))
+
+
+async def find_deck_by_tag(
+    db: Database, tag: str
+) -> tuple[dict[str, list[dict]], dict | None] | None:
+    """The player's latest decks by mode and their entry from the battle log (None when the
+    log is empty). None if no player has this tag."""
     try:
-        await save_player_from_battle_log(db, tag, data)
-    except sqlite3.OperationalError as e:
-        await log.warning(f"Couldn't save player {tag}: {e}")
-    return await get_deck.get_last_decks(data)
+        battles = await get_battle_log(tag)
+    except aiohttp.ClientResponseError as e:
+        if e.status != 404:
+            raise
+        return None
+    return await decks_from_battle_log(db, tag, battles), find_player_in_battle_log(tag, battles)

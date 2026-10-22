@@ -1,6 +1,7 @@
 from discord.ext import commands
 
 import core
+from clash import player as cr_player
 
 
 class Search(commands.Cog, name="🔎 Search"):
@@ -18,6 +19,7 @@ class Search(commands.Cog, name="🔎 Search"):
 
         `!deck name` - the player has no clan (unless only one player has that name).
         `!deck name, .` - the player is in a clan, but you don't know which.
+        `!deck #tag` - the player with that tag.
 
         Example: `!deck Ijihu, Lifetime`
         """
@@ -34,6 +36,10 @@ class Search(commands.Cog, name="🔎 Search"):
         elif len(args) == 1:
             name = args[0].strip()
             clan = None
+            # Lots of names are also valid tags, so search by name if no player has the tag
+            tag = cr_player.normalise_tag(name)
+            if tag is not None and await self.bot.search_by_tag(tag, ctx.message):
+                return
         else:
             await ctx.reply("Invalid number of arguments.")
             return

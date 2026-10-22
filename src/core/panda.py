@@ -164,10 +164,45 @@ class Panda(commands.Bot):
                 await message.reply(embed=embed)
                 return
 
-            for deck_mode, deck in decks.items():
-                await log.info(f"Found {deck_mode} deck for {name}: {[card['name'] for card in deck]}")
-            mode = deck_views.first_mode(decks)
-            image = (await generate_image.build_deck_image(decks[mode])).getvalue()
+            await self.reply_with_decks(decks, name, clan, message)
+
+        time_taken = time.time() - start
+        await log.info(f"Search by info took {time_taken:.2f}s")
+
+    async def search_by_tag(self, tag: str, message: discord.Message) -> bool:
+        """Shows the deck of the player with this tag. False if no player has it."""
+        start = time.time()
+
+        await log.info(f"Searching for tag: {tag}")
+        async with message.channel.typing():
+            found = await search.find_deck_by_tag(self.db, tag)
+            if found is None:
+                await log.info(f"No player with tag {tag}")
+                return False
+            decks, player = found
+
+            # An empty battle log has no name or clan to show
+            name = player["name"] if player else tag
+            clan = (player.get("clan") or {}).get("name") if player else None
+            if not decks:
+                embed = discord.Embed(title="No deck Found", color=settings.ERROR_COLOR)
+                embed.add_field(name="Tag", value=tag, inline=False)
+                await message.reply(embed=embed)
+                return True
+
+            await self.reply_with_decks(decks, name, clan, message)
+
+        time_taken = time.time() - start
+        await log.info(f"Search by tag took {time_taken:.2f}s")
+        return True
+
+    async def reply_with_decks(
+        self, decks: dict[str, list[dict]], name: str, clan: str | None, message: discord.Message
+    ) -> None:
+        for deck_mode, deck in decks.items():
+            await log.info(f"Found {deck_mode} deck for {name}: {[card['name'] for card in deck]}")
+        mode = deck_views.first_mode(decks)
+        image = (await generate_image.build_deck_image(decks[mode])).getvalue()
 
         content = deck_views.deck_message(name, clan)
         file = discord.File(io.BytesIO(image), filename=deck_views.DECK_IMAGE_FILENAME)
@@ -178,9 +213,6 @@ class Panda(commands.Bot):
             view = deck_views.DeckModeView(decks, mode, image)
             view.message = await message.reply(content, file=file, view=view)
             view.prebuild()
-
-        time_taken = time.time() - start
-        await log.info(f"Search by info took {time_taken:.2f}s")
 
     async def search_by_screenshot(self, message: discord.Message) -> None:
         start = time.time()
