@@ -79,10 +79,14 @@ def is_ranked(battle: dict) -> bool:
     return battle.get("type") == "pathOfLegend"
 
 
+# Ladder games are "Showdown_Friendly" below 14k trophies and "Ladder" above
+LADDER_GAME_MODES = {"Ladder", "Showdown_Friendly"}
+
+
 def is_ladder(battle: dict) -> bool:
     # Ladder games come as type "PvP" or "trail", and "trail" also covers events (draft,
-    # showdown, event decks) whose decks aren't the player's own. The game mode tells them apart
-    return (battle.get("gameMode") or {}).get("name") == "Ladder"
+    # event decks) whose decks aren't the player's own. The game mode tells them apart
+    return (battle.get("gameMode") or {}).get("name") in LADDER_GAME_MODES
 
 
 # Ranked first: that's the deck shown first when a player has both
