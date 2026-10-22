@@ -13,6 +13,8 @@ services:
       - ./bot.log:/app/bot.log
       - ./data:/app/data
       - ./src:/app/src/
+      # Live like src/, so schema changes apply on restart instead of needing a rebuild
+      - ./db:/app/db:ro
 
     depends_on:
       - lavalink
@@ -37,6 +39,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./src:/app/src/
+      - ./db:/app/db:ro
 
   lavalink:
     image: ghcr.io/lavalink-devs/lavalink:4
