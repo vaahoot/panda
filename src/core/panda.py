@@ -17,6 +17,19 @@ from clash.scraping import search
 from config import paths, settings, tokens
 
 
+# Name, player tag, clan name, clan tag
+PlayerInfo = tuple[str, str | None, str | None, str | None]
+
+
+def describe_player(player: dict | None, name: str, clan: str | None) -> PlayerInfo:
+    """The player's real name and clan with their tags, or the ones searched for (without tags)
+    when the player wasn't found."""
+    if player is None:
+        return name, None, clan, None
+    player_clan = player.get("clan") or {}
+    return player["name"], player.get("tag"), player_clan.get("name"), player_clan.get("tag")
+
+
 class Panda(commands.Bot):
     def __init__(
         self,
@@ -155,16 +168,15 @@ class Panda(commands.Bot):
         channel = message.channel
 
         async with channel.typing():
-            decks = await search.find_deck(self.db, name, clan)
+            found = await search.find_deck(self.db, name, clan)
+            decks, player = found or ({}, None)
+            info = describe_player(player, name, clan)
 
             if not decks:
-                embed = discord.Embed(title="No deck Found", color=settings.ERROR_COLOR)
-                embed.add_field(name="Name", value=name, inline=False)
-                embed.add_field(name="Clan", value=clan, inline=False)
-                await message.reply(embed=embed)
+                await self.reply_no_deck(info, message, player_found=found is not None)
                 return
 
-            await self.reply_with_decks(decks, name, clan, message)
+            await self.reply_with_decks(decks, info, message)
 
         time_taken = time.time() - start
         await log.info(f"Search by info took {time_taken:.2f}s")
@@ -180,38 +192,43 @@ class Panda(commands.Bot):
                 await log.info(f"No player with tag {tag}")
                 return False
             decks, player = found
+            # Without the player's details there's only the tag to show
+            info = describe_player(player, tag, None)
 
-            # An empty battle log has no name or clan to show
-            name = player["name"] if player else tag
-            clan = (player.get("clan") or {}).get("name") if player else None
             if not decks:
-                embed = discord.Embed(title="No deck Found", color=settings.ERROR_COLOR)
-                embed.add_field(name="Tag", value=tag, inline=False)
-                await message.reply(embed=embed)
+                await self.reply_no_deck(info, message)
                 return True
 
-            await self.reply_with_decks(decks, name, clan, message)
+            await self.reply_with_decks(decks, info, message)
 
         time_taken = time.time() - start
         await log.info(f"Search by tag took {time_taken:.2f}s")
         return True
 
-    async def reply_with_decks(
-        self, decks: dict[str, list[dict]], name: str, clan: str | None, message: discord.Message
+    async def reply_no_deck(
+        self, info: PlayerInfo, message: discord.Message, player_found: bool = True
     ) -> None:
+        embed = discord.Embed(
+            title="No Deck Found" if player_found else "No Player Found",
+            description=deck_views.player_text(*info),
+            color=settings.ERROR_COLOR,
+        )
+        await message.reply(embed=embed)
+
+    async def reply_with_decks(
+        self, decks: dict[str, list[dict]], info: PlayerInfo, message: discord.Message
+    ) -> None:
+        name, name_tag, clan, clan_tag = info
         for deck_mode, deck in decks.items():
             await log.info(f"Found {deck_mode} deck for {name}: {[card['name'] for card in deck]}")
         mode = deck_views.first_mode(decks)
         image = (await generate_image.build_deck_image(decks[mode])).getvalue()
 
-        content = deck_views.deck_message(name, clan)
         file = discord.File(io.BytesIO(image), filename=deck_views.DECK_IMAGE_FILENAME)
-        if len(decks) == 1:
-            await message.reply(content, file=file)
-        else:
-            # Both ranked and ladder decks: show ranked, with a menu to switch
-            view = deck_views.DeckModeView(decks, mode, image)
-            view.message = await message.reply(content, file=file, view=view)
+        view = deck_views.DeckView(decks, mode, image, name, name_tag, clan, clan_tag)
+        view.message = await message.reply(file=file, view=view)
+        if len(decks) > 1:
+            # Both ranked and ladder decks: ranked is showing, get the other one ready
             view.prebuild()
 
     async def search_by_screenshot(self, message: discord.Message) -> None:

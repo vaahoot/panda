@@ -206,17 +206,36 @@ async def save_player_from_battle_log(db: Database, tag: str, battles: list[dict
     await db.save_player(participant["tag"], name, clan.get("tag"), clan.get("name"), normalise(name))
 
 
-async def decks_from_battle_log(db: Database, tag: str, battles: list[dict]) -> dict[str, list[dict]]:
+async def get_player_entry(tag: str, battles: list[dict]) -> dict | None:
+    """The player's name, tag and clan: from the battle log, or from their profile when the log
+    is empty (it has the same fields). None if the profile can't be fetched either."""
+    participant = find_player_in_battle_log(tag, battles)
+    if participant is not None:
+        return participant
+    try:
+        return await cr_api_get(search_settings.CR_API_PLAYER.format(urllib.parse.quote(tag)))
+    except aiohttp.ClientError as e:
+        await log.warning(f"Couldn't get player {tag}: {e}")
+        return None
+
+
+async def decks_from_battle_log(
+    db: Database, tag: str, battles: list[dict]
+) -> tuple[dict[str, list[dict]], dict | None]:
+    """The player's latest decks by mode (see get_deck.get_last_decks) and their name, tag and
+    clan (see get_player_entry)."""
     # Adds players found by the fallback searches and refreshes stale names/clans
     try:
         await save_player_from_battle_log(db, tag, battles)
     except sqlite3.OperationalError as e:
         await log.warning(f"Couldn't save player {tag}: {e}")
-    return await get_deck.get_last_decks(battles)
+    return await get_deck.get_last_decks(battles), await get_player_entry(tag, battles)
 
 
-async def find_deck(db: Database, name: str, clan: str | None) -> dict[str, list[dict]] | None:
-    """The player's latest decks by mode (see get_deck.get_last_decks), None if not found."""
+async def find_deck(
+    db: Database, name: str, clan: str | None
+) -> tuple[dict[str, list[dict]], dict | None] | None:
+    """See decks_from_battle_log. None if not found."""
     tag = await find_tag(db, name, clan)
     if not tag:
         await log.info(f"Player {name} not found")
@@ -228,12 +247,11 @@ async def find_deck(db: Database, name: str, clan: str | None) -> dict[str, list
 async def find_deck_by_tag(
     db: Database, tag: str
 ) -> tuple[dict[str, list[dict]], dict | None] | None:
-    """The player's latest decks by mode and their entry from the battle log (None when the
-    log is empty). None if no player has this tag."""
+    """See decks_from_battle_log. None if no player has this tag."""
     try:
         battles = await get_battle_log(tag)
     except aiohttp.ClientResponseError as e:
         if e.status != 404:
             raise
         return None
-    return await decks_from_battle_log(db, tag, battles), find_player_in_battle_log(tag, battles)
+    return await decks_from_battle_log(db, tag, battles)

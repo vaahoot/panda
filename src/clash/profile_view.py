@@ -27,6 +27,16 @@ LEAGUES = [
 ]
 
 
+def player_link(tag: str) -> str:
+    """The tag as a link to the player's RoyaleAPI page."""
+    return f"[`{tag}`]({ROYALE_API_PLAYER.format(tag.lstrip('#'))})"
+
+
+def clan_link(tag: str) -> str:
+    """The tag as a link to the clan's RoyaleAPI page."""
+    return f"[`{tag}`]({ROYALE_API_CLAN.format(tag.lstrip('#'))})"
+
+
 def clan_badge(player: dict) -> str:
     """Name of the clan's badge emoji. Badge emojis are named by the API's badgeId."""
     clan = player.get("clan")
@@ -39,7 +49,7 @@ def clan_text(player: dict) -> str:
     if not clan:
         return ""
     role = CLAN_ROLES.get(player.get("role", ""), "Member")
-    return f"{clan['name']} `{clan['tag']}`\n{role}"
+    return f"{clan['name']} {clan_link(clan['tag'])}\n{role}"
 
 
 def with_emoji(emojis: dict[str, str], name: str, text: str, after: bool = False) -> str:
@@ -100,7 +110,7 @@ class ProfileView(discord.ui.LayoutView):
         super().__init__(timeout=None)
         tag = player["tag"]
 
-        title = discord.ui.TextDisplay(f"## {player['name']}\n`{tag}`")
+        title = discord.ui.TextDisplay(f"## {player['name']}\n{player_link(tag)}")
         clan = player.get("clan")
 
         stats = [
@@ -113,18 +123,6 @@ class ProfileView(discord.ui.LayoutView):
             (with_emoji(emojis, "crownblue", "Win Rate"), winrate_text(player)),
         ]
 
-        buttons = discord.ui.ActionRow(
-            discord.ui.Button(
-                label="RoyaleAPI", url=ROYALE_API_PLAYER.format(tag.lstrip("#"))
-            )
-        )
-        if clan:
-            buttons.add_item(
-                discord.ui.Button(
-                    label="Clan", url=ROYALE_API_CLAN.format(clan["tag"].lstrip("#"))
-                )
-            )
-
         self.add_item(
             discord.ui.Container(
                 title,
@@ -133,8 +131,6 @@ class ProfileView(discord.ui.LayoutView):
                     discord.ui.TextDisplay(f"### {name}\n{value}" if value else f"### {name}")
                     for name, value in stats
                 ),
-                discord.ui.Separator(),
-                buttons,
                 accent_colour=settings.MAIN_COLOR,
             )
         )

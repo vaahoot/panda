@@ -4,6 +4,7 @@ import io
 import discord
 
 import log
+from clash.profile_view import clan_link, player_link
 from config import settings
 
 from . import generate_image
@@ -12,8 +13,16 @@ from .get_deck import RANKED
 DECK_IMAGE_FILENAME = "deck.png"
 
 
-def deck_message(name: str, clan: str | None) -> str:
-    return f"Name: {name}\nClan: {clan}"
+def with_tag(name: str, tag_link: str | None) -> str:
+    name = f"**{discord.utils.escape_markdown(name)}**"
+    return f"{name} {tag_link}" if tag_link else name
+
+
+def player_text(name: str, name_tag: str | None, clan: str | None, clan_tag: str | None) -> str:
+    """Name and clan, with their tags linking to their RoyaleAPI pages."""
+    name_text = with_tag(name, player_link(name_tag) if name_tag else None)
+    clan_text = with_tag(clan, clan_link(clan_tag) if clan_tag else None) if clan else "**No clan**"
+    return f"-# Name\n{name_text}\n-# Clan\n{clan_text}"
 
 
 def first_mode(decks: dict[str, list[dict]]) -> str:
@@ -27,25 +36,46 @@ class DeckModeSelect(discord.ui.Select):
         super().__init__(placeholder="Choose a mode", options=options)
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        view: DeckModeView = self.view  # type: ignore
+        view: DeckView = self.view  # type: ignore
         mode = self.values[0]
         for option in self.options:
             option.default = option.label == mode
 
+        # The gallery shows attachment://deck.png, so replacing the file switches the image
         await interaction.response.edit_message(attachments=[await view.image_file(mode)], view=view)
 
 
-class DeckModeView(discord.ui.View):
-    """Switches the deck image between the player's ranked and ladder decks. Images are built
-    the first time a mode is picked and reused after that."""
+class DeckView(discord.ui.LayoutView):
+    """The player's name and clan with the deck image below. When they have both ranked and
+    ladder decks, a menu switches between them. Images are built the first time a mode is
+    picked and reused after that."""
 
-    def __init__(self, decks: dict[str, list[dict]], current: str, current_image: bytes):
+    def __init__(
+        self,
+        decks: dict[str, list[dict]],
+        current: str,
+        current_image: bytes,
+        name: str,
+        name_tag: str | None,
+        clan: str | None,
+        clan_tag: str | None,
+    ):
         super().__init__(timeout=300)
         self.decks = decks
         self.images: dict[str, bytes] = {current: current_image}
         self.message: discord.Message | None = None
-        self.add_item(DeckModeSelect(list(decks), current))
         self.prebuild_task: asyncio.Task | None = None
+
+        self.menu: discord.ui.ActionRow | None = None
+        if len(decks) > 1:
+            self.menu = discord.ui.ActionRow(DeckModeSelect(list(decks), current))
+        self.container = discord.ui.Container(
+            discord.ui.TextDisplay(player_text(name, name_tag, clan, clan_tag)),
+            discord.ui.MediaGallery(discord.MediaGalleryItem(f"attachment://{DECK_IMAGE_FILENAME}")),
+            *([self.menu] if self.menu else []),
+            accent_colour=settings.MAIN_COLOR,
+        )
+        self.add_item(self.container)
 
     def prebuild(self) -> None:
         """Builds the other modes' images in the background, so a switch only waits for Discord."""
@@ -82,9 +112,11 @@ class DeckModeView(discord.ui.View):
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
     async def on_timeout(self) -> None:
-        # Keep whichever deck is showing, just drop the menu
-        if self.message is not None:
+        # Keep whichever deck is showing, just drop the menu. The text and image are part of
+        # the view too, so it can't be removed altogether
+        if self.message is not None and self.menu is not None:
+            self.container.remove_item(self.menu)
             try:
-                await self.message.edit(view=None)
+                await self.message.edit(view=self)
             except discord.HTTPException:
                 pass  # Message deleted, nothing to clean up
