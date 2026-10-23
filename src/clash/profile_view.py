@@ -71,6 +71,7 @@ def rank_text(player: dict, emojis: dict[str, str]) -> str:
     lines = []
     for key, label in (
         ("currentPathOfLegendSeasonResult", "Current"),
+        ("lastPathOfLegendSeasonResult", "Last"),
         ("bestPathOfLegendSeasonResult", "Best"),
     ):
         result = player.get(key) or {}
