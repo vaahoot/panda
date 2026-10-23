@@ -287,14 +287,17 @@ class Database:
 
     async def add_playlist_tracks(
         self, playlist_id: int, tracks: list[tuple[str, str, str]]
-    ) -> None:
-        """tracks is a list of (url, title, author)."""
+    ) -> int:
+        """tracks is a list of (url, title, author). Tracks already in the playlist are
+        skipped, returns how many were added."""
         assert self.connection is not None
-        await self.connection.executemany(
-            "INSERT INTO playlist_track(playlist_id, url, title, author) VALUES(?, ?, ?, ?)",
+        cursor = await self.connection.executemany(
+            "INSERT OR IGNORE INTO playlist_track(playlist_id, url, title, author) \
+            VALUES(?, ?, ?, ?)",
             [(playlist_id, *track) for track in tracks],
         )
         await self.connection.commit()
+        return cursor.rowcount
 
     async def get_playlist_urls(self, playlist_id: int) -> list[str]:
         assert self.connection is not None
@@ -310,18 +313,18 @@ class Database:
 
     async def get_playlist_tracks(
         self, playlist_id: int
-    ) -> list[tuple[int, str | None, str | None]]:
-        """Returns (track id, title, author) for each track in the playlist."""
+    ) -> list[tuple[int, str | None, str | None, str]]:
+        """Returns (track id, title, author, url) for each track in the playlist."""
         assert self.connection is not None
         cursor = await self.connection.execute(
-            "SELECT track_id, title, author \
+            "SELECT track_id, title, author, url \
             FROM playlist_track \
             WHERE playlist_id = ? \
             ORDER BY track_id",
             (playlist_id,),
         )
         rows = await cursor.fetchall()
-        return [(row[0], row[1], row[2]) for row in rows]
+        return [(row[0], row[1], row[2], row[3]) for row in rows]
 
     async def delete_playlist_track(self, playlist_id: int, track_id: int) -> bool:
         assert self.connection is not None

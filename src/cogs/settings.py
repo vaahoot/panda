@@ -14,15 +14,15 @@ class Settings(commands.Cog, name="⚙️ Settings"):
         self.bot: core.Panda = bot
 
     @commands.command(
-        aliases=["sc"], brief="<on/off> Mark current channel as a screenshot channel."
+        aliases=["as"], brief="<on/off> Search every image sent in this channel."
     )
     @commands.guild_only()
-    async def screenshot_channel(
+    async def autoscan(
         self, ctx: commands.Context, state: str | None = None
     ) -> None:
-        """Mark the current channel as a screenshot channel.
-        In a screenshot channel, the bot will attempt to search every image sent, no !screenshot needed.
-        Useful to save save time and not type !screenshot/!s every time.
+        """Turn autoscan on or off for the current channel.
+        With autoscan on, the bot searches every image sent in the channel, no !screenshot needed.
+        Without on/off, shows whether autoscan is on here.
         """
         guild = ctx.guild
         channel = ctx.channel
@@ -35,9 +35,9 @@ class Settings(commands.Cog, name="⚙️ Settings"):
         if not state:
             image_channel = await self.bot.db.is_image_channel(guild, channel)
             if image_channel:
-                await ctx.send(f"Channel {channel.name} is a screenshot channel.")
+                await ctx.send(f"Autoscan is on in {channel.mention}.")
             else:
-                await ctx.send(f"Channel {channel.name} is not a screenshot channel.")
+                await ctx.send(f"Autoscan is off in {channel.mention}.")
 
             return
 
@@ -46,21 +46,17 @@ class Settings(commands.Cog, name="⚙️ Settings"):
         if state.lower() == "on":
             add = await self.bot.db.add_image_channel(guild, channel)
             if add:
-                await ctx.send(f"Channel {channel.name} is now a screenshot channel.")
+                await ctx.send(f"Autoscan is now on in {channel.mention}.")
             else:
-                await ctx.send(
-                    f"Channel {channel.name} was already a screenshot channel."
-                )
+                await ctx.send(f"Autoscan was already on in {channel.mention}.")
         elif state.lower() == "off":
             remove = await self.bot.db.remove_image_channel(guild, channel)
             if remove:
-                await ctx.send(
-                    f"Channel {channel.name} is no longer a screenshot channel."
-                )
+                await ctx.send(f"Autoscan is now off in {channel.mention}.")
             else:
-                await ctx.send(f"Channel {channel.name} wasn't a screenshot channel.")
+                await ctx.send(f"Autoscan was already off in {channel.mention}.")
         else:
-            await ctx.reply(f"Invalid state: `{state}`.")
+            await ctx.reply(f"Invalid state: `{state}`. Use `on` or `off`.")
 
     @commands.command(brief="Change the current command prefix.")
     @commands.guild_only()

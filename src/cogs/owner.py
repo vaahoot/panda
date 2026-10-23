@@ -35,7 +35,7 @@ class Owner(commands.Cog, name="🐼 Owner"):
 
     @commands.command()
     @commands.is_owner()
-    async def list_guilds(self, ctx: commands.Context):
+    async def guilds(self, ctx: commands.Context):
         embed = discord.Embed(title=f"Guilds: {len(self.bot.guilds)}", color=MAIN_COLOR)
 
         for guild in self.bot.guilds:
@@ -45,7 +45,7 @@ class Owner(commands.Cog, name="🐼 Owner"):
 
     @commands.command()
     @commands.is_owner()
-    async def leave_guild(self, ctx: commands.Context, guild_id: int):
+    async def leave(self, ctx: commands.Context, guild_id: int):
         for guild in self.bot.guilds:
             if guild.id == guild_id:
                 await guild.leave()
@@ -96,7 +96,7 @@ class Owner(commands.Cog, name="🐼 Owner"):
 
     @commands.command()
     @commands.is_owner()
-    async def list_users(self, ctx: commands.Context):
+    async def users(self, ctx: commands.Context):
         res = ""
         for user in self.bot.users:
             res += f"{user.name}\n"

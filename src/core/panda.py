@@ -75,6 +75,7 @@ class Panda(commands.Bot):
         await self.load_extension("cogs.settings")
         await self.load_extension("cogs.support")
         await self.load_extension("cogs.music")
+        await self.load_extension("cogs.playlists")
         await self.load_extension("cogs.royale")
 
         await self.db.connect()

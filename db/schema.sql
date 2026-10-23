@@ -33,6 +33,10 @@ CREATE TABLE IF NOT EXISTS playlist_track(
   FOREIGN KEY(playlist_id) REFERENCES playlist(playlist_id) ON DELETE CASCADE
 );
 
+-- A track can only be in a playlist once. An index rather than UNIQUE in the table
+-- so it also applies to databases made before it
+CREATE UNIQUE INDEX IF NOT EXISTS playlist_track_url ON playlist_track(playlist_id, url);
+
 -- Clash Royale players collected by src/crawl_players.py, used for deck search by name
 CREATE TABLE IF NOT EXISTS cr_player(
   tag TEXT PRIMARY KEY,
