@@ -2,6 +2,7 @@ import contextlib
 from collections.abc import Awaitable, Callable
 
 import discord
+import wavelink
 from discord.ext import commands
 
 import log
@@ -11,6 +12,7 @@ from database import Playlist
 SELECT_OPTION_LIMIT = 25  # Discord's limit for options in a select menu
 SELECT_TEXT_LIMIT = 100  # Discord's limit for a select option label or description
 PAGE_SIZE = 20  # Lines per page in a paged list
+QUEUE_PAGE_SIZE = 10
 # Keep a full page of links under the embed description limit
 TRACK_TITLE_LIMIT = 80
 TRACK_AUTHOR_LIMIT = 40
@@ -338,7 +340,7 @@ def track_line(number: int, track: Track) -> str:
 
 
 class PagesView(AuthorMenuView):
-    """Numbered lines in an embed, PAGE_SIZE per page with buttons to page through.
+    """Numbered lines in an embed, page_size per page with buttons to page through.
     noun is the (singular, plural) name of what's listed, for the count in the footer."""
 
     def __init__(
@@ -348,9 +350,11 @@ class PagesView(AuthorMenuView):
         lines: list[str],
         noun: tuple[str, str],
         empty_text: str = "",
+        page_size: int = PAGE_SIZE,
     ):
         super().__init__(ctx, timeout=300)
         self.noun = noun
+        self.page_size = page_size
         self.set_lines(heading, lines, empty_text)
         self.render()
 
@@ -360,13 +364,13 @@ class PagesView(AuthorMenuView):
         self.lines = lines
         self.empty_text = empty_text
         self.page = 0
-        self.pages = -(-len(lines) // PAGE_SIZE)
+        self.pages = -(-len(lines) // self.page_size)
 
     def embed(self) -> discord.Embed:
-        start = self.page * PAGE_SIZE
+        start = self.page * self.page_size
         lines: list[str] = []
         length = 0
-        for line in self.lines[start : start + PAGE_SIZE]:
+        for line in self.lines[start : start + self.page_size]:
             length += len(line) + 1
             if length > EMBED_DESCRIPTION_LIMIT:
                 break
@@ -385,6 +389,9 @@ class PagesView(AuthorMenuView):
 
     def render(self) -> None:
         self.clear_items()
+        self.add_page_buttons()
+
+    def add_page_buttons(self) -> None:
         if self.pages > 1:
             # Labels can't be bold, these heavy brackets read like a bold < and >
             self.add_item(PageButton("❮", -1, self.page == 0))
@@ -486,3 +493,96 @@ class TabbedPagesView(PagesView):
         super().render()
         for index, (label, emoji, *_) in enumerate(self.tabs):
             self.add_item(TabButton(label, emoji, index, index == self.tab))
+
+
+def queue_line(number: int, track: wavelink.Playable) -> str:
+    return rf"{number}\. [**{track.title}**]({track.uri}) by **{track.author}**"
+
+
+class QueueSelect(discord.ui.Select):
+    def __init__(self, tracks: list[wavelink.Playable], start: int):
+        # By position rather than title, the same song can be queued twice
+        self.tracks = {
+            str(number): track for number, track in enumerate(tracks, start=start + 1)
+        }
+        options = [
+            discord.SelectOption(
+                label=f"{number}. {track.title}"[:SELECT_TEXT_LIMIT],
+                value=number,
+                description=track.author[:SELECT_TEXT_LIMIT] if track.author else None,
+            )
+            for number, track in self.tracks.items()
+        ]
+        super().__init__(placeholder="Skip to a song", options=options)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: QueueView = self.view  # type: ignore
+        await view.skip_to(interaction, self.tracks[self.values[0]])
+
+
+class QueueView(PagesView):
+    """The playing track and the queue, QUEUE_PAGE_SIZE per page, with a dropdown of the
+    page's tracks that skips to the chosen one. Anyone can use it.
+    queue is what plays next: the player's queue, or its autoplay queue when that's empty."""
+
+    def __init__(
+        self, ctx: commands.Context, player: wavelink.Player, queue: wavelink.Queue
+    ):
+        # Set before super().__init__, which renders the dropdown
+        self.player = player
+        self.queue = queue
+        self.current = player.current
+        self.tracks = list(queue)
+        super().__init__(
+            ctx,
+            "Queue",
+            [queue_line(n, track) for n, track in enumerate(self.tracks, start=1)],
+            ("song", "songs"),
+            page_size=QUEUE_PAGE_SIZE,
+        )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return True
+
+    def embed(self) -> discord.Embed:
+        embed = super().embed()
+        if self.current is not None:
+            playing = queue_line(0, self.current)
+            embed.description = f"{playing}\n{embed.description}" if embed.description else playing
+        return embed
+
+    def render(self) -> None:
+        self.clear_items()
+        start = self.page * self.page_size
+        page = self.tracks[start : start + self.page_size]
+        if page:
+            self.add_item(QueueSelect(page, start))
+        self.add_page_buttons()
+
+    async def skip_to(self, interaction: discord.Interaction, track: wavelink.Playable) -> None:
+        # The queue may have moved on since this was sent, find where the track is now
+        index = next((i for i, queued in enumerate(self.queue) if queued is track), None)
+        if index is None or not self.player.connected:
+            embed = discord.Embed(
+                description=f"**{track.title}** isn't in the queue anymore.",
+                color=settings.ERROR_COLOR,
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        del self.queue[:index]
+        await self.player.skip(force=True)
+
+        # The picked track is up next, show the queue as it's about to be
+        self.current = track
+        self.tracks = list(self.queue)[1:]
+        self.set_lines(
+            self.heading,
+            [queue_line(n, queued) for n, queued in enumerate(self.tracks, start=1)],
+        )
+        self.render()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+        await interaction.followup.send(
+            f"{interaction.user.mention} skipped to **{track.title}**.",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )

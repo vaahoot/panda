@@ -8,6 +8,7 @@ import core
 import log
 from config import settings
 from music import PandaPlayer, get_player
+from music.views import QueueView
 
 
 class Music(commands.Cog, name="🎶 Music"):
@@ -142,13 +143,13 @@ class Music(commands.Cog, name="🎶 Music"):
     @commands.command(aliases=["q", "Q"], brief="Get the track queue.")
     @commands.guild_only()
     async def queue(self, ctx: commands.Context) -> None:
-        """Get the track queue."""
+        """Get the track queue, 10 songs per page.
+        Anyone can page through it and pick a song from the dropdown to skip to it."""
         player: PandaPlayer = cast("PandaPlayer", ctx.voice_client)
         if player is None:
             await ctx.reply("Not playing anything right now.")
             return
 
-        embed: discord.Embed = discord.Embed(title="Queue", color=settings.MAIN_COLOR)
         queue: wavelink.Queue
 
         if len(player.queue) > 0:
@@ -157,32 +158,14 @@ class Music(commands.Cog, name="🎶 Music"):
             queue = player.auto_queue
 
         if len(queue) <= 0 and player.current is None:
-            embed.title = ""
-            embed.description = "Nothing in the queue"
+            embed = discord.Embed(
+                description="Nothing in the queue", color=settings.MAIN_COLOR
+            )
             await ctx.send(embed=embed)
             return
 
-        counter = 0
-        if player.current is not None:
-            embed.add_field(
-                name="",
-                value=rf"{counter}\. [**{player.current.title}**]({player.current.uri}) by **{player.current.author}**",
-                inline=False
-            )
-            counter += 1
-
-        for track in queue:
-            if counter > 10:
-                break
-
-            embed.add_field(
-                name="",
-                value=rf"{counter}\. [**{track.title}**]({track.uri}) by **{track.author}**",
-                inline=False,
-            )
-            counter += 1
-
-        await ctx.send(embed=embed)
+        view = QueueView(ctx, player, queue)
+        view.message = await ctx.send(embed=view.embed(), view=view)
 
     @commands.command(aliases=["repeat"], brief="Loop track/queue/off.")
     @commands.guild_only()
