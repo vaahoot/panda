@@ -96,15 +96,22 @@ class Music(commands.Cog, name="🎶 Music"):
             # Play now since we aren't playing anything...
             await player.play(player.queue.get())
 
-    @commands.command(aliases=["s", "S"], brief="Skip current track.")
+    @commands.command(aliases=["s", "S"], brief="[n] Skip the current track, or n tracks.")
     @commands.guild_only()
-    async def skip(self, ctx: commands.Context) -> None:
-        """Skip current track."""
+    async def skip(self, ctx: commands.Context, n: int = 1) -> None:
+        """Skip the current track, or with n the current track and the next n - 1 in the queue.
+        Skipping more tracks than are queued skips them all."""
         player: PandaPlayer = cast("PandaPlayer", ctx.voice_client)
         if not player:
             await ctx.reply("I'm not even playing anything.")
             return
 
+        if n < 1:
+            await ctx.reply("I can only skip 1 track or more.")
+            return
+
+        # The current track counts as one, the rest come off the front of the queue
+        del player.queue[: n - 1]
         await player.skip(force=True)
         await ctx.message.add_reaction("\u2705")
 
