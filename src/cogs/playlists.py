@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import re
 from collections.abc import Awaitable, Callable
 
@@ -7,13 +8,19 @@ import wavelink
 from discord.ext import commands
 
 import core
+import log
 from config import settings
+from database import Playlist
 from music import get_player
 from music.views import (
+    PERSONAL_EMOJI,
     SELECT_OPTION_LIMIT,
+    SERVER_EMOJI,
+    ChoiceView,
     PagesView,
     PlaylistPagesView,
     PlaylistView,
+    TabbedPagesView,
     TrackView,
 )
 
@@ -26,54 +33,203 @@ PLAYLIST_LINK = re.compile(
 PLAYLIST_NAME_LIMIT = 100  # Discord's limit for a select option label
 # Lavalink lookups at once when loading a playlist, so big playlists don't flood it
 PLAYLIST_LOAD_CONCURRENCY = 10
+SERVER_PLAYLIST_LIMIT = 50
+BUTTON_LABEL_LIMIT = 80  # Discord's limit for a button label
+
+# Which playlists a command works on
+ALL, PERSONAL, SERVER = "all", "personal", "server"
+
+
+def is_mod(user: discord.abc.User) -> bool:
+    return isinstance(user, discord.Member) and user.guild_permissions.manage_guild
+
+
+def can_manage(user: discord.abc.User, playlist: Playlist) -> bool:
+    """Whether the user can delete, lock or unlock the playlist: their own, or a server
+    playlist they created or they're a mod in."""
+    return playlist.user_id == user.id or (
+        playlist.guild_id is not None and is_mod(user)
+    )
+
+
+def can_edit(user: discord.abc.User, playlist: Playlist) -> bool:
+    """Whether the user can save or remove tracks: anyone can in an unlocked server playlist."""
+    return (playlist.guild_id is not None and not playlist.locked) or can_manage(
+        user, playlist
+    )
+
+
+def bold_name(playlist: Playlist) -> str:
+    """The playlist's name for messages, marked when it's a server playlist."""
+    if playlist.guild_id is None:
+        return f"**{playlist.name}**"
+    return f"{SERVER_EMOJI} **{playlist.name}**"
+
+
+def error_embed(description: str) -> discord.Embed:
+    return discord.Embed(description=description, color=settings.ERROR_COLOR)
 
 
 class Playlists(commands.Cog, name="💿 Playlists"):
+    """Your own playlists work in every server, server playlists are shared by everyone in
+    one server. Commands work on both, you'll be asked when a name matches one of each."""
+
     def __init__(self, bot: core.Panda):
         self.bot: core.Panda = bot
+        # Marks locked server playlists in the list, the bot's "locked" emoji once loaded
+        self.locked_emoji = "🔒"
 
-    async def send_playlist_menu(
+    async def cog_load(self) -> None:
+        try:
+            emojis = await self.bot.fetch_application_emojis()
+        except discord.HTTPException as e:
+            await log.warning(f"Couldn't fetch the application emojis: {e}")
+            return
+        emoji = discord.utils.get(emojis, name="locked")
+        if emoji is None:
+            await log.warning("The bot has no \"locked\" emoji, using 🔒 instead")
+            return
+        self.locked_emoji = str(emoji)
+
+    async def choose_playlist(
         self,
         ctx: commands.Context,
+        name: str | None,
         description: str,
-        on_select: Callable[[str], Awaitable[None]],
+        on_select: Callable[[Playlist], Awaitable[None]],
+        scope: str = ALL,
+        usable: Callable[[Playlist], bool] | None = None,
+        none_usable: str | None = None,
     ) -> None:
-        """Send a dropdown of the author's playlists, or an error if they have none."""
-        names = await self.bot.db.get_playlists(ctx.author)
-        if not names:
+        """Run on_select with the author's or the server's playlist called name. Without a
+        name, or when both have one called that, send a dropdown to pick from.
+        The dropdown only offers playlists that pass usable, none_usable is the error when
+        none do. A typed name skips that check, so on_select can say why it can't be used."""
+        playlists = await self.bot.db.get_playlists(ctx.author, ctx.guild)
+        if scope == PERSONAL:
+            playlists = [p for p in playlists if p.guild_id is None]
+        elif scope == SERVER:
+            playlists = [p for p in playlists if p.guild_id is not None]
+
+        if name is not None:
+            name = name.strip()
+            matches = [p for p in playlists if p.name.casefold() == name.casefold()]
+            if not matches:
+                await ctx.reply(embed=error_embed(self.not_found(ctx, name, scope)))
+                return
+            if len(matches) == 1:
+                await on_select(matches[0])
+                return
             embed = discord.Embed(
+                title=matches[0].name,
                 description=(
-                    "You don't have any playlists yet. Create one with "
-                    f"`{ctx.clean_prefix}create <name>`."
+                    "You and this server both have a playlist with this name, "
+                    "which one do you mean?"
                 ),
-                color=settings.ERROR_COLOR,
+                color=settings.MAIN_COLOR,
             )
-            await ctx.reply(embed=embed)
+            view = PlaylistView(ctx, matches, on_select)
+            view.message = await ctx.send(embed=embed, view=view)
+            return
+
+        if usable is not None:
+            playlists = [p for p in playlists if usable(p)]
+        if not playlists:
+            await ctx.reply(
+                embed=error_embed(none_usable or self.no_playlists(ctx, scope))
+            )
             return
 
         embed = discord.Embed(
-            title="Your playlists", description=description, color=settings.MAIN_COLOR
+            title="Playlists", description=description, color=settings.MAIN_COLOR
         )
-        if len(names) > SELECT_OPTION_LIMIT:
+        if len(playlists) > SELECT_OPTION_LIMIT:
             embed.set_footer(
                 text=f"Showing the first {SELECT_OPTION_LIMIT}, "
                 "type the playlist name to use the rest."
             )
-
-        view = PlaylistView(ctx, names, on_select)
+        view = PlaylistView(ctx, playlists, on_select)
         view.message = await ctx.send(embed=embed, view=view)
 
-    async def save_to_playlist(
-        self, ctx: commands.Context, name: str, link: str
-    ) -> None:
-        """Save the track(s) behind a link to the author's playlist."""
-        embed = discord.Embed(color=settings.ERROR_COLOR)
+    def not_found(self, ctx: commands.Context, name: str, scope: str) -> str:
+        if scope == SERVER:
+            return f"This server doesn't have a playlist called **{name}**."
+        if scope == PERSONAL or ctx.guild is None:
+            return f"You don't have a playlist called **{name}**."
+        return f"Neither you nor this server have a playlist called **{name}**."
 
-        playlist_id = await self.bot.db.get_playlist_id(ctx.author, name)
-        if playlist_id is None:
-            embed.description = f"You don't have a playlist called **{name}**."
-            await ctx.reply(embed=embed)
+    def no_playlists(self, ctx: commands.Context, scope: str) -> str:
+        create = f"Create one with `{ctx.clean_prefix}create <name>`."
+        if scope == SERVER:
+            return f"This server doesn't have any playlists yet. {create}"
+        if scope == PERSONAL or ctx.guild is None:
+            return f"You don't have any playlists yet. {create}"
+        return f"Neither you nor this server have any playlists yet. {create}"
+
+    async def refresh(
+        self, ctx: commands.Context, playlist: Playlist
+    ) -> Playlist | None:
+        """The playlist as it is now, it may have been locked or deleted since a menu showed it."""
+        current = await self.bot.db.get_playlist(playlist.playlist_id)
+        if current is None:
+            await ctx.reply(
+                embed=error_embed(f"{bold_name(playlist)} doesn't exist anymore.")
+            )
+        return current
+
+    async def check_edit(self, ctx: commands.Context, playlist: Playlist) -> bool:
+        if can_edit(ctx.author, playlist):
+            return True
+        await ctx.reply(
+            embed=error_embed(
+                f"{bold_name(playlist)} is locked, only its creator and members "
+                "with Manage Server can change it."
+            )
+        )
+        return False
+
+    async def check_manage(
+        self, ctx: commands.Context, playlist: Playlist, action: str
+    ) -> bool:
+        if can_manage(ctx.author, playlist):
+            return True
+        await ctx.reply(
+            embed=error_embed(
+                f"Only the creator of {bold_name(playlist)} and members with "
+                f"Manage Server can {action} it."
+            )
+        )
+        return False
+
+    async def check_server_create(self, ctx: commands.Context) -> bool:
+        """Whether the author can add another playlist to the server, replies if not."""
+        assert ctx.guild is not None
+        if await self.bot.db.get_mods_create_playlists(ctx.guild) and not is_mod(ctx.author):
+            await ctx.reply(
+                embed=error_embed(
+                    "Only members with Manage Server can create server playlists here."
+                )
+            )
+            return False
+        if await self.bot.db.count_guild_playlists(ctx.guild) >= SERVER_PLAYLIST_LIMIT:
+            await ctx.reply(
+                embed=error_embed(
+                    f"This server already has {SERVER_PLAYLIST_LIMIT} playlists, "
+                    "delete one to make room."
+                )
+            )
+            return False
+        return True
+
+    async def save_to_playlist(
+        self, ctx: commands.Context, playlist: Playlist, link: str
+    ) -> None:
+        """Save the track(s) behind a link to the playlist."""
+        current = await self.refresh(ctx, playlist)
+        if current is None or not await self.check_edit(ctx, current):
             return
+        name = bold_name(current)
+        embed = discord.Embed(color=settings.ERROR_COLOR)
 
         try:
             async with ctx.typing():
@@ -90,19 +246,20 @@ class Playlists(commands.Cog, name="💿 Playlists"):
 
         tracks = result.tracks if isinstance(result, wavelink.Playlist) else [result[0]]
         added = await self.bot.db.add_playlist_tracks(
-            playlist_id,
+            current.playlist_id,
             [(track.uri or link, track.title, track.author) for track in tracks],
+            ctx.author,
         )
 
         if added == 0:
             if isinstance(result, wavelink.Playlist):
                 embed.description = (
-                    f"Every track from **`{result.name}`** is already in **{name}**."
+                    f"Every track from **`{result.name}`** is already in {name}."
                 )
             else:
                 embed.description = (
                     f"**{tracks[0].title}** by **{tracks[0].author}** "
-                    f"is already in **{name}**."
+                    f"is already in {name}."
                 )
             await ctx.reply(embed=embed)
             return
@@ -110,47 +267,77 @@ class Playlists(commands.Cog, name="💿 Playlists"):
         embed.color = settings.MAIN_COLOR
         if isinstance(result, wavelink.Playlist):
             embed.description = (
-                f"Added **{added}** tracks from **`{result.name}`** to **{name}**."
+                f"Added **{added}** tracks from **`{result.name}`** to {name}."
             )
             if added < len(tracks):
                 embed.description += f" Skipped {len(tracks) - added} already in it."
         else:
             embed.description = (
-                f"Added **{tracks[0].title}** by **{tracks[0].author}** to **{name}**."
+                f"Added **{tracks[0].title}** by **{tracks[0].author}** to {name}."
             )
         await ctx.send(embed=embed)
 
-    async def remove_playlist(self, ctx: commands.Context, name: str) -> None:
-        """Delete the author's playlist along with its tracks."""
-        deleted = await self.bot.db.delete_playlist(ctx.author, name)
-        if not deleted:
-            embed = discord.Embed(
-                description=f"You don't have a playlist called **{name}**.",
-                color=settings.ERROR_COLOR,
-            )
-            await ctx.reply(embed=embed)
+    async def remove_playlist(self, ctx: commands.Context, playlist: Playlist) -> None:
+        """Ask to confirm, then delete the playlist along with its tracks."""
+        current = await self.refresh(ctx, playlist)
+        if current is None or not await self.check_manage(ctx, current, "delete"):
             return
 
-        embed = discord.Embed(
-            description=f"Deleted the playlist **{name}**.", color=settings.MAIN_COLOR
-        )
-        await ctx.send(embed=embed)
+        async def on_delete() -> None:
+            # Checked again, it may have changed while the question was open
+            latest = await self.refresh(ctx, current)
+            if latest is None or not await self.check_manage(ctx, latest, "delete"):
+                return
+            await self.bot.db.delete_playlist(latest.playlist_id)
+            embed = discord.Embed(
+                description=f"Deleted the playlist {bold_name(latest)}.",
+                color=settings.MAIN_COLOR,
+            )
+            await ctx.send(embed=embed)
 
-    async def load_playlist(self, ctx: commands.Context, name: str) -> None:
-        """Add every track of the author's playlist to the queue."""
+        async def on_cancel() -> None:
+            embed = discord.Embed(
+                description=f"Kept the playlist {bold_name(current)}.",
+                color=settings.MAIN_COLOR,
+            )
+            await ctx.send(embed=embed)
+
+        count = len(await self.bot.db.get_playlist_urls(current.playlist_id))
+        description = (
+            f"This deletes {bold_name(current)} and its {count} "
+            f"{'track' if count == 1 else 'tracks'}, it can't be undone."
+        )
+        if current.guild_id is not None:
+            description += " Everyone in this server will lose it."
+        view = ChoiceView(
+            ctx,
+            [
+                ("Delete", None, discord.ButtonStyle.danger, False, on_delete),
+                ("Cancel", None, discord.ButtonStyle.secondary, False, on_cancel),
+            ],
+            timeout_message="Delete timed out, the playlist was kept.",
+        )
+        view.message = await ctx.send(
+            embed=discord.Embed(
+                title=f"Delete {current.name}?",
+                description=description,
+                color=settings.ERROR_COLOR,
+            ),
+            view=view,
+        )
+
+    async def load_playlist(self, ctx: commands.Context, playlist: Playlist) -> None:
+        """Add every track of the playlist to the queue."""
+        current = await self.refresh(ctx, playlist)
+        if current is None:
+            return
         embed = discord.Embed(color=settings.ERROR_COLOR)
 
-        playlist_id = await self.bot.db.get_playlist_id(ctx.author, name)
-        if playlist_id is None:
-            embed.description = f"You don't have a playlist called **{name}**."
-            await ctx.reply(embed=embed)
-            return
-
-        urls = await self.bot.db.get_playlist_urls(playlist_id)
+        urls = await self.bot.db.get_playlist_urls(current.playlist_id)
         if not urls:
             embed.description = (
-                f"**{name}** is empty. Add tracks with "
-                f"`{ctx.clean_prefix}save {name} <link>`."
+                f"{bold_name(current)} is empty. Add tracks with "
+                f"`{ctx.clean_prefix}save {current.name} <link>`."
             )
             await ctx.reply(embed=embed)
             return
@@ -183,14 +370,16 @@ class Playlists(commands.Cog, name="💿 Playlists"):
                 tracks.append(result[0])
 
         if not tracks:
-            embed.description = f"Couldn't load any tracks from **{name}**."
+            embed.description = f"Couldn't load any tracks from {bold_name(current)}."
             await ctx.reply(embed=embed)
             return
 
         added: int = await player.queue.put_wait(tracks)
 
         embed.color = settings.MAIN_COLOR
-        embed.description = f"Added the playlist **`{name}`** ({added} songs) to the queue."
+        embed.description = (
+            f"Added the playlist {bold_name(current)} ({added} songs) to the queue."
+        )
         if failed:
             embed.set_footer(text=f"{failed} track(s) couldn't be loaded.")
         await ctx.send(embed=embed)
@@ -198,217 +387,525 @@ class Playlists(commands.Cog, name="💿 Playlists"):
         if not player.playing:
             await player.play(player.queue.get())
 
-    async def send_track_menu(self, ctx: commands.Context, name: str) -> None:
-        """Send a dropdown of the tracks in the author's playlist, deleting the chosen one."""
+    def user_name(self, ctx: commands.Context, user_id: int) -> str | None:
+        member = ctx.guild.get_member(user_id) if ctx.guild else None
+        user = member or self.bot.get_user(user_id)
+        return user.display_name if user else None
+
+    async def send_track_menu(self, ctx: commands.Context, playlist: Playlist) -> None:
+        """Send a dropdown of the tracks in the playlist, deleting the chosen one."""
+        current = await self.refresh(ctx, playlist)
+        if current is None or not await self.check_edit(ctx, current):
+            return
+        name = bold_name(current)
         embed = discord.Embed(color=settings.ERROR_COLOR)
 
-        playlist_id = await self.bot.db.get_playlist_id(ctx.author, name)
-        if playlist_id is None:
-            embed.description = f"You don't have a playlist called **{name}**."
+        tracks = await self.bot.db.get_playlist_tracks(current.playlist_id)
+        if not tracks:
+            embed.description = f"{name} doesn't have any tracks."
             await ctx.reply(embed=embed)
             return
 
-        tracks = await self.bot.db.get_playlist_tracks(playlist_id)
-        if not tracks:
-            embed.description = f"**{name}** doesn't have any tracks."
-            await ctx.reply(embed=embed)
-            return
+        # Everything in your own playlist was added by you, only server playlists show who
+        adders: dict[int, str] = {}
+        if current.guild_id is not None:
+            for track_id, user_id in (
+                await self.bot.db.get_track_adders(current.playlist_id)
+            ).items():
+                if (user_name := self.user_name(ctx, user_id)) is not None:
+                    adders[track_id] = user_name
 
         async def on_select(track_id: int, title: str) -> None:
-            deleted = await self.bot.db.delete_playlist_track(playlist_id, track_id)
+            # It may have been locked while the menu was open
+            latest = await self.refresh(ctx, current)
+            if latest is None or not await self.check_edit(ctx, latest):
+                return
+            deleted = await self.bot.db.delete_playlist_track(
+                current.playlist_id, track_id
+            )
             if deleted:
                 embed.color = settings.MAIN_COLOR
-                embed.description = f"Removed **{title}** from **{name}**."
+                embed.description = f"Removed **{title}** from {name}."
             else:
-                embed.description = f"**{title}** is no longer in **{name}**."
+                embed.description = f"**{title}** is no longer in {name}."
             await ctx.send(embed=embed)
 
-        view = TrackView(ctx, tracks, on_select)
+        view = TrackView(ctx, tracks, on_select, adders)
         view.message = await ctx.send(
             embed=discord.Embed(
-                title=name,
+                title=current.name,
                 description="Pick a track to remove from the playlist.",
                 color=settings.MAIN_COLOR,
             ),
             view=view,
         )
 
-    async def show_tracks(self, ctx: commands.Context, name: str) -> None:
-        """Send the tracks of the author's playlist as pages of links."""
-        embed = discord.Embed(color=settings.ERROR_COLOR)
-
-        playlist_id = await self.bot.db.get_playlist_id(ctx.author, name)
-        if playlist_id is None:
-            embed.description = f"You don't have a playlist called **{name}**."
-            await ctx.reply(embed=embed)
+    async def show_tracks(self, ctx: commands.Context, playlist: Playlist) -> None:
+        """Send the tracks of the playlist as pages of links."""
+        current = await self.refresh(ctx, playlist)
+        if current is None:
             return
 
-        tracks = await self.bot.db.get_playlist_tracks(playlist_id)
+        tracks = await self.bot.db.get_playlist_tracks(current.playlist_id)
         if not tracks:
-            embed.description = f"**{name}** doesn't have any tracks."
-            await ctx.reply(embed=embed)
+            await ctx.reply(
+                embed=error_embed(f"{bold_name(current)} doesn't have any tracks.")
+            )
             return
 
-        async def on_play() -> None:
-            await self.load_playlist(ctx, name)
+        async def on_play(user: discord.abc.User) -> None:
+            # Anyone can press Play, the playlist goes to the voice channel of whoever did
+            play_ctx = ctx
+            if user.id != ctx.author.id:
+                play_ctx = copy.copy(ctx)
+                play_ctx.author = user  # type: ignore
+            await self.load_playlist(play_ctx, current)
 
+        async def on_lock(interaction: discord.Interaction) -> bool | None:
+            latest = await self.bot.db.get_playlist(current.playlist_id)
+            if latest is None:
+                description = f"{bold_name(current)} doesn't exist anymore."
+            elif not can_manage(interaction.user, latest):
+                action = "unlock" if latest.locked else "lock"
+                description = (
+                    f"Only the creator of {bold_name(latest)} and members with "
+                    f"Manage Server can {action} it."
+                )
+            else:
+                await self.bot.db.set_playlist_locked(latest.playlist_id, not latest.locked)
+                return not latest.locked
+            await interaction.response.send_message(
+                embed=error_embed(description), ephemeral=True
+            )
+            return None
+
+        server = current.guild_id is not None
+        heading = f"{SERVER_EMOJI} {current.name}" if server else current.name
         # Playing needs a voice channel, so there's no Play button in DMs
-        view = PlaylistPagesView(ctx, name, tracks, on_play if ctx.guild else None)
+        view = PlaylistPagesView(
+            ctx,
+            heading,
+            tracks,
+            on_play if ctx.guild else None,
+            locked=current.locked,
+            on_lock=on_lock if server else None,
+        )
         if view.children:
             view.message = await ctx.send(embed=view.embed(), view=view)
         else:
             view.stop()
             await ctx.send(embed=view.embed())
 
-    @commands.command(brief="<name> Create a new playlist.")
-    async def create(self, ctx: commands.Context, *, name: str) -> None:
-        """Create a new playlist with the given name.
-        Playlists belong to you and can be played in any server."""
-        embed = discord.Embed(color=settings.ERROR_COLOR)
-        name = name.strip()
-
-        if len(name) > PLAYLIST_NAME_LIMIT:
-            embed.description = (
-                f"Playlist names can be at most {PLAYLIST_NAME_LIMIT} characters."
+    async def create_personal(self, ctx: commands.Context, name: str) -> None:
+        if await self.bot.db.create_playlist(ctx.author, name) is None:
+            await ctx.reply(
+                embed=error_embed(f"You already have a playlist called **{name}**.")
             )
-            await ctx.reply(embed=embed)
             return
-
-        created = await self.bot.db.create_playlist(ctx.author, name)
-        if not created:
-            embed.description = f"You already have a playlist called **{name}**."
-            await ctx.reply(embed=embed)
-            return
-
-        embed.color = settings.MAIN_COLOR
-        embed.description = (
-            f"Created the playlist **{name}**. Add tracks with "
-            f"`{ctx.clean_prefix}save {name} <link>`."
+        embed = discord.Embed(
+            description=(
+                f"Created your playlist **{name}**. Add tracks with "
+                f"`{ctx.clean_prefix}save {name} <link>`."
+            ),
+            color=settings.MAIN_COLOR,
         )
         await ctx.send(embed=embed)
 
+    async def create_server(self, ctx: commands.Context, name: str) -> None:
+        assert ctx.guild is not None
+        if not await self.check_server_create(ctx):
+            return
+        if await self.bot.db.create_playlist(ctx.author, name, ctx.guild) is None:
+            await ctx.reply(
+                embed=error_embed(f"This server already has a playlist called **{name}**.")
+            )
+            return
+        embed = discord.Embed(
+            description=(
+                f"Created the server playlist {SERVER_EMOJI} **{name}**. Anyone here can "
+                f"add tracks with `{ctx.clean_prefix}save {name} <link>`, you or a mod "
+                f"can stop that with `{ctx.clean_prefix}lock {name}`."
+            ),
+            color=settings.MAIN_COLOR,
+        )
+        await ctx.send(embed=embed)
+
+    async def set_locked(
+        self, ctx: commands.Context, playlist: Playlist, locked: bool
+    ) -> None:
+        current = await self.refresh(ctx, playlist)
+        action = "lock" if locked else "unlock"
+        if current is None or not await self.check_manage(ctx, current, action):
+            return
+        if current.locked == locked:
+            await ctx.reply(
+                embed=error_embed(f"{bold_name(current)} is already {action}ed.")
+            )
+            return
+
+        await self.bot.db.set_playlist_locked(current.playlist_id, locked)
+        if locked:
+            description = (
+                f"Locked {bold_name(current)}, only its creator and members with "
+                "Manage Server can change it now."
+            )
+        else:
+            description = f"Unlocked {bold_name(current)}, anyone here can change it now."
+        await ctx.send(
+            embed=discord.Embed(description=description, color=settings.MAIN_COLOR)
+        )
+
+    async def share_playlist(self, ctx: commands.Context, playlist: Playlist) -> None:
+        """Copy the author's playlist into a new server playlist."""
+        assert ctx.guild is not None
+        current = await self.refresh(ctx, playlist)
+        if current is None or not await self.check_server_create(ctx):
+            return
+        new_id = await self.bot.db.copy_playlist(
+            current.playlist_id, ctx.author, current.name, ctx.guild
+        )
+        if new_id is None:
+            await ctx.reply(
+                embed=error_embed(
+                    f"This server already has a playlist called **{current.name}**."
+                )
+            )
+            return
+        embed = discord.Embed(
+            description=(
+                f"Shared **{current.name}** with the server as {SERVER_EMOJI} "
+                f"**{current.name}**. It's a copy, changes to one don't affect the other."
+            ),
+            color=settings.MAIN_COLOR,
+        )
+        await ctx.send(embed=embed)
+
+    async def copy_playlist(self, ctx: commands.Context, playlist: Playlist) -> None:
+        """Copy a server playlist into a new playlist of the author's."""
+        current = await self.refresh(ctx, playlist)
+        if current is None:
+            return
+        new_id = await self.bot.db.copy_playlist(
+            current.playlist_id, ctx.author, current.name
+        )
+        if new_id is None:
+            await ctx.reply(
+                embed=error_embed(f"You already have a playlist called **{current.name}**.")
+            )
+            return
+        embed = discord.Embed(
+            description=(
+                f"Copied {bold_name(current)} to your playlists as **{current.name}**, "
+                "you can play it in any server now."
+            ),
+            color=settings.MAIN_COLOR,
+        )
+        await ctx.send(embed=embed)
+
+    @commands.command(brief="<name> Create a new playlist.")
+    async def create(self, ctx: commands.Context, *, name: str) -> None:
+        """Create a new playlist with the given name.
+        In a server you choose whether it's just yours, playable in any server,
+        or a server playlist everyone here can play and add to."""
+        name = name.strip()
+
+        if len(name) > PLAYLIST_NAME_LIMIT:
+            await ctx.reply(
+                embed=error_embed(
+                    f"Playlist names can be at most {PLAYLIST_NAME_LIMIT} characters."
+                )
+            )
+            return
+
+        guild = ctx.guild
+        if guild is None or (
+            await self.bot.db.get_mods_create_playlists(guild) and not is_mod(ctx.author)
+        ):
+            await self.create_personal(ctx, name)
+            return
+
+        taken = await self.bot.db.find_playlists(ctx.author, guild, name)
+        personal_taken = any(p.guild_id is None for p in taken)
+        server_taken = any(p.guild_id is not None for p in taken)
+        if personal_taken and server_taken:
+            await ctx.reply(
+                embed=error_embed(
+                    f"You and this server both have a playlist called **{name}** already."
+                )
+            )
+            return
+
+        async def on_personal() -> None:
+            await self.create_personal(ctx, name)
+
+        async def on_server() -> None:
+            await self.create_server(ctx, name)
+
+        description = (
+            f"**Just me**: yours only, play it in any server.\n"
+            f"**Everyone**: anyone in this server can play it and add tracks."
+        )
+        if personal_taken:
+            description += f"\n\nYou already have a playlist called **{name}**."
+        elif server_taken:
+            description += f"\n\nThis server already has a playlist called **{name}**."
+        view = ChoiceView(
+            ctx,
+            [
+                (
+                    "Just me",
+                    PERSONAL_EMOJI,
+                    discord.ButtonStyle.primary,
+                    personal_taken,
+                    on_personal,
+                ),
+                (
+                    f"Everyone in {guild.name}"[:BUTTON_LABEL_LIMIT],
+                    SERVER_EMOJI,
+                    discord.ButtonStyle.primary,
+                    server_taken,
+                    on_server,
+                ),
+            ],
+        )
+        view.message = await ctx.send(
+            embed=discord.Embed(
+                title=f"Who is {name} for?",
+                description=description,
+                color=settings.MAIN_COLOR,
+            ),
+            view=view,
+        )
+
     @commands.command(brief="[name] <link> Save a track to a playlist.")
     async def save(self, ctx: commands.Context, *, args: str) -> None:
-        """Save a YouTube or Spotify link to one of your playlists.
+        """Save a YouTube or Spotify link to a playlist.
         The link goes last, e.g. `save my playlist <link>`.
-        Without a name you'll get a menu to pick from your playlists.
+        Without a name you'll get a menu to pick from your playlists and the server's.
         Playlist and album links save every track in them."""
         parts = args.rsplit(maxsplit=1)
         name = parts[0].strip() if len(parts) > 1 else None
         link = parts[-1].strip("<>")
 
         if not PLAYLIST_LINK.match(link):
-            embed = discord.Embed(
-                description="I can only save YouTube or Spotify links.",
-                color=settings.ERROR_COLOR,
+            await ctx.reply(
+                embed=error_embed("I can only save YouTube or Spotify links.")
             )
-            await ctx.reply(embed=embed)
             return
 
-        if name is not None:
-            await self.save_to_playlist(ctx, name, link)
-            return
+        async def on_select(playlist: Playlist) -> None:
+            await self.save_to_playlist(ctx, playlist, link)
 
-        async def on_select(chosen: str) -> None:
-            await self.save_to_playlist(ctx, chosen, link)
-
-        await self.send_playlist_menu(
-            ctx, "Pick a playlist to save the track to.", on_select
+        await self.choose_playlist(
+            ctx,
+            name,
+            "Pick a playlist to save the track to.",
+            on_select,
+            usable=lambda p: can_edit(ctx.author, p),
         )
 
     @commands.command(brief="[name] Remove a track from a playlist.")
     async def unsave(
         self, ctx: commands.Context, *, name: str | None = None
     ) -> None:
-        """Remove a track from one of your playlists.
-        Without a name you'll get a menu to pick from your playlists,
+        """Remove a track from a playlist.
+        Without a name you'll get a menu to pick from your playlists and the server's,
         then a menu to pick the track to remove."""
-        if name is not None:
-            await self.send_track_menu(ctx, name.strip())
-            return
 
-        async def on_select(chosen: str) -> None:
-            await self.send_track_menu(ctx, chosen)
+        async def on_select(playlist: Playlist) -> None:
+            await self.send_track_menu(ctx, playlist)
 
-        await self.send_playlist_menu(
-            ctx, "Pick a playlist to remove a track from.", on_select
+        await self.choose_playlist(
+            ctx,
+            name,
+            "Pick a playlist to remove a track from.",
+            on_select,
+            usable=lambda p: can_edit(ctx.author, p),
         )
 
-    @commands.command(aliases=["pl"], brief="[name] Play one of your playlists.")
+    @commands.command(aliases=["pl"], brief="[name] Play a playlist.")
     @commands.guild_only()
     async def playlist(self, ctx: commands.Context, *, name: str | None = None) -> None:
-        """Add one of your playlists to the queue.
-        Without a name you'll get a menu to pick from your playlists."""
+        """Add one of your playlists or one of the server's to the queue.
+        Without a name you'll get a menu to pick from."""
         if isinstance(ctx.channel, (discord.DMChannel, discord.GroupChannel)):
             return
 
-        if name is not None:
-            await self.load_playlist(ctx, name.strip())
-            return
+        async def on_select(playlist: Playlist) -> None:
+            await self.load_playlist(ctx, playlist)
 
-        async def on_select(chosen: str) -> None:
-            await self.load_playlist(ctx, chosen)
-
-        await self.send_playlist_menu(
-            ctx, "Pick a playlist to add to the queue.", on_select
+        await self.choose_playlist(
+            ctx, name, "Pick a playlist to add to the queue.", on_select
         )
 
     @commands.command(brief="[name] Show the tracks in a playlist.")
     async def view(
         self, ctx: commands.Context, *, name: str | None = None
     ) -> None:
-        """Show every track in one of your playlists, 20 per page.
-        In a server there's a Play button to add the playlist to the queue.
-        Without a name you'll get a menu to pick from your playlists."""
-        if name is not None:
-            await self.show_tracks(ctx, name.strip())
-            return
+        """Show every track in a playlist, 20 per page.
+        In a server anyone can press Play to add the playlist to the queue, and server
+        playlists have a button for their creator and mods to lock or unlock them.
+        Without a name you'll get a menu to pick from your playlists and the server's."""
 
-        async def on_select(chosen: str) -> None:
-            await self.show_tracks(ctx, chosen)
+        async def on_select(playlist: Playlist) -> None:
+            await self.show_tracks(ctx, playlist)
 
-        await self.send_playlist_menu(ctx, "Pick a playlist to show.", on_select)
+        await self.choose_playlist(ctx, name, "Pick a playlist to show.", on_select)
 
-    @commands.command(aliases=["pls"], brief="List your playlists.")
+    @commands.command(aliases=["pls"], brief="List your playlists and the server's.")
     async def playlists(self, ctx: commands.Context) -> None:
-        """List all of your playlists and how many tracks each one has."""
-        playlists = await self.bot.db.get_playlist_summaries(ctx.author)
-        if not playlists:
-            embed = discord.Embed(
-                description=(
-                    "You don't have any playlists yet. Create one with "
-                    f"`{ctx.clean_prefix}create <name>`."
-                ),
-                color=settings.ERROR_COLOR,
+        """List your playlists and, in a server, the server's playlists,
+        with how many tracks each one has."""
+        personal = await self.bot.db.get_playlist_summaries(user=ctx.author)
+        personal_lines = [
+            rf"{counter}\. **{p.name}** - {count} {'track' if count == 1 else 'tracks'}"
+            for counter, (p, count) in enumerate(personal, start=1)
+        ]
+
+        if ctx.guild is None:
+            if not personal_lines:
+                await ctx.reply(embed=error_embed(self.no_playlists(ctx, PERSONAL)))
+                return
+            view = PagesView(
+                ctx, "Your playlists", personal_lines, ("playlist", "playlists")
             )
-            await ctx.reply(embed=embed)
+            if view.children:
+                view.message = await ctx.send(embed=view.embed(), view=view)
+            else:
+                view.stop()
+                await ctx.send(embed=view.embed())
             return
 
-        lines = [
-            rf"{counter}\. **{name}** - {count} {'track' if count == 1 else 'tracks'}"
-            for counter, (name, count) in enumerate(playlists, start=1)
+        server = await self.bot.db.get_playlist_summaries(guild=ctx.guild)
+        server_lines = [
+            rf"{counter}\. **{p.name}**{f' {self.locked_emoji}' if p.locked else ''} - "
+            f"{count} {'track' if count == 1 else 'tracks'} · <@{p.user_id}>"
+            for counter, (p, count) in enumerate(server, start=1)
         ]
-        view = PagesView(ctx, "Your playlists", lines, ("playlist", "playlists"))
-        if view.children:
-            view.message = await ctx.send(embed=view.embed(), view=view)
-        else:
-            view.stop()
-            await ctx.send(embed=view.embed())
+        if not personal_lines and not server_lines:
+            await ctx.reply(embed=error_embed(self.no_playlists(ctx, ALL)))
+            return
 
-    @commands.command(aliases=["del"], brief="[name] Delete one of your playlists.")
+        create = f"Create one with `{ctx.clean_prefix}create <name>`."
+        view = TabbedPagesView(
+            ctx,
+            [
+                (
+                    "Mine",
+                    PERSONAL_EMOJI,
+                    "Your playlists",
+                    personal_lines,
+                    f"You don't have any playlists yet. {create}",
+                ),
+                (
+                    "Server",
+                    SERVER_EMOJI,
+                    f"{ctx.guild.name} playlists",
+                    server_lines,
+                    f"This server doesn't have any playlists yet. {create}",
+                ),
+            ],
+            ("playlist", "playlists"),
+            # The server's list unless it's empty and yours isn't
+            tab=1 if server_lines or not personal_lines else 0,
+        )
+        view.message = await ctx.send(embed=view.embed(), view=view)
+
+    @commands.command(aliases=["del"], brief="[name] Delete a playlist.")
     async def delete(
         self, ctx: commands.Context, *, name: str | None = None
     ) -> None:
-        """Delete one of your playlists and all the tracks saved in it.
+        """Delete a playlist and all the tracks saved in it, after you confirm.
+        Server playlists can be deleted by their creator and members with Manage Server.
+        Without a name you'll get a menu to pick from."""
+
+        async def on_select(playlist: Playlist) -> None:
+            await self.remove_playlist(ctx, playlist)
+
+        await self.choose_playlist(
+            ctx,
+            name,
+            "Pick a playlist to delete.",
+            on_select,
+            usable=lambda p: can_manage(ctx.author, p),
+        )
+
+    @commands.command(brief="[name] Stop others changing a server playlist.")
+    @commands.guild_only()
+    async def lock(self, ctx: commands.Context, *, name: str | None = None) -> None:
+        """Lock a server playlist so only its creator and members with Manage Server
+        can save or remove tracks. Everyone can still play it.
+        Only the creator and members with Manage Server can lock it.
+        Without a name you'll get a menu to pick from."""
+
+        async def on_select(playlist: Playlist) -> None:
+            await self.set_locked(ctx, playlist, True)
+
+        await self.choose_playlist(
+            ctx,
+            name,
+            "Pick a server playlist to lock.",
+            on_select,
+            scope=SERVER,
+            usable=lambda p: can_manage(ctx.author, p) and not p.locked,
+            none_usable="There are no server playlists you can lock.",
+        )
+
+    @commands.command(brief="[name] Let everyone change a server playlist again.")
+    @commands.guild_only()
+    async def unlock(self, ctx: commands.Context, *, name: str | None = None) -> None:
+        """Unlock a server playlist so anyone in the server can save or remove tracks.
+        Only the creator and members with Manage Server can unlock it.
+        Without a name you'll get a menu to pick from."""
+
+        async def on_select(playlist: Playlist) -> None:
+            await self.set_locked(ctx, playlist, False)
+
+        await self.choose_playlist(
+            ctx,
+            name,
+            "Pick a server playlist to unlock.",
+            on_select,
+            scope=SERVER,
+            usable=lambda p: can_manage(ctx.author, p) and p.locked,
+            none_usable="There are no locked server playlists you can unlock.",
+        )
+
+    @commands.command(brief="[name] Copy one of your playlists to the server.")
+    @commands.guild_only()
+    async def share(self, ctx: commands.Context, *, name: str | None = None) -> None:
+        """Copy one of your playlists into a new server playlist with the same name,
+        so everyone here can play it and add to it. Your playlist stays as it is.
         Without a name you'll get a menu to pick from your playlists."""
-        if name is not None:
-            await self.remove_playlist(ctx, name.strip())
-            return
 
-        async def on_select(chosen: str) -> None:
-            await self.remove_playlist(ctx, chosen)
+        async def on_select(playlist: Playlist) -> None:
+            await self.share_playlist(ctx, playlist)
 
-        await self.send_playlist_menu(ctx, "Pick a playlist to delete.", on_select)
+        await self.choose_playlist(
+            ctx,
+            name,
+            "Pick one of your playlists to share with the server.",
+            on_select,
+            scope=PERSONAL,
+        )
+
+    @commands.command(brief="[name] Copy a server playlist to your playlists.")
+    @commands.guild_only()
+    async def copy(self, ctx: commands.Context, *, name: str | None = None) -> None:
+        """Copy a server playlist into your own playlists with the same name,
+        so you can play it in any server.
+        Without a name you'll get a menu to pick from the server's playlists."""
+
+        async def on_select(playlist: Playlist) -> None:
+            await self.copy_playlist(ctx, playlist)
+
+        await self.choose_playlist(
+            ctx,
+            name,
+            "Pick a server playlist to copy to your playlists.",
+            on_select,
+            scope=SERVER,
+        )
 
 
 async def setup(bot):

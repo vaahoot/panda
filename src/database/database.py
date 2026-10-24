@@ -1,5 +1,6 @@
 import pathlib
 import sqlite3
+from typing import NamedTuple
 
 import aiofiles
 import aiosqlite
@@ -36,7 +37,19 @@ ADDED_COLUMNS = [
     ("cr_player", "clan_tag", "TEXT"),
     ("cr_clan", "search_name", "TEXT"),
     ("cr_player", "updated_at", "INTEGER"),
+    ("guild", "mods_create_playlists", "INTEGER NOT NULL DEFAULT 0"),
+    ("playlist_track", "added_by", "INTEGER"),
 ]
+
+PLAYLIST_COLUMNS = "playlist_id, name, user_id, guild_id, locked"
+
+
+class Playlist(NamedTuple):
+    playlist_id: int
+    name: str
+    user_id: int  # the owner, or whoever created a server playlist
+    guild_id: int | None  # None = personal playlist
+    locked: bool
 
 
 class Database:
@@ -101,7 +114,8 @@ class Database:
         keeping every playlist's id (and so its tracks):
         - early versions created playlist.name without COLLATE NOCASE, so "Chill" and "chill"
           could both exist and lookups were case-sensitive
-        - playlist.user_id didn't reference discord_user before that table existed"""
+        - playlist.user_id didn't reference discord_user before that table existed
+        - names were unique per user before server playlists (guild_id, locked) existed"""
         assert self.connection is not None
         cursor = await self.connection.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'playlist'"
@@ -111,7 +125,11 @@ class Database:
             return
         definition = row[0].upper()
         case_sensitive = "NOCASE" not in definition
-        if not case_sensitive and "REFERENCES DISCORD_USER" in definition:
+        if (
+            not case_sensitive
+            and "REFERENCES DISCORD_USER" in definition
+            and "GUILD_ID" in definition
+        ):
             return
 
         if case_sensitive:
@@ -142,11 +160,14 @@ class Database:
             );
             -- Every playlist owner needs a row for the new foreign key
             INSERT OR IGNORE INTO discord_user(user_id) SELECT DISTINCT user_id FROM playlist;
+            -- Names are kept unique by the schema's indexes, so personal and server
+            -- playlists can share one
             CREATE TABLE playlist_new(
               playlist_id INTEGER PRIMARY KEY,
               user_id INTEGER NOT NULL,
+              guild_id INTEGER,
               name TEXT NOT NULL COLLATE NOCASE,
-              UNIQUE(user_id, name),
+              locked INTEGER NOT NULL DEFAULT 0,
               FOREIGN KEY(user_id) REFERENCES discord_user(user_id) ON DELETE CASCADE
             );
             INSERT INTO playlist_new(playlist_id, user_id, name)
@@ -252,49 +273,128 @@ class Database:
         row = await cursor.fetchone()
         return row[0] if row else None
 
-    async def create_playlist(self, user: discord.abc.User, name: str) -> bool:
+    async def set_mods_create_playlists(self, guild: discord.Guild, mods_only: bool) -> None:
+        assert self.connection is not None
+        await self.connection.execute(
+            "INSERT INTO guild(guild_id, mods_create_playlists) VALUES(?, ?) \
+            ON CONFLICT(guild_id) DO UPDATE SET mods_create_playlists = excluded.mods_create_playlists",
+            (guild.id, mods_only),
+        )
+        await self.connection.commit()
+
+    async def get_mods_create_playlists(self, guild: discord.Guild) -> bool:
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "SELECT mods_create_playlists FROM guild WHERE guild_id = ?", (guild.id,)
+        )
+        row = await cursor.fetchone()
+        return bool(row and row[0])
+
+    async def create_playlist(
+        self, user: discord.abc.User, name: str, guild: discord.Guild | None = None
+    ) -> int | None:
+        """Creates a personal playlist, or a server playlist with guild. Returns its id, or
+        None if the name is taken."""
         assert self.connection is not None
         await self.add_user(user)
         cursor = await self.connection.execute(
-            "INSERT OR IGNORE INTO playlist(user_id, name) VALUES(?, ?)",
-            (user.id, name),
+            "INSERT OR IGNORE INTO playlist(user_id, guild_id, name) VALUES(?, ?, ?)",
+            (user.id, guild.id if guild else None, name),
         )
         await self.connection.commit()
-        return cursor.rowcount > 0
+        return cursor.lastrowid if cursor.rowcount > 0 else None
 
-    async def get_playlists(self, user: discord.abc.User) -> list[str]:
+    async def copy_playlist(
+        self,
+        playlist_id: int,
+        user: discord.abc.User,
+        name: str,
+        guild: discord.Guild | None = None,
+    ) -> int | None:
+        """Creates a playlist like create_playlist with the tracks of another one, saved as
+        added by user. Returns its id, or None if the name is taken."""
+        assert self.connection is not None
+        await self.add_user(user)
+        cursor = await self.connection.execute(
+            "INSERT OR IGNORE INTO playlist(user_id, guild_id, name) VALUES(?, ?, ?)",
+            (user.id, guild.id if guild else None, name),
+        )
+        if cursor.rowcount == 0:
+            await self.connection.commit()
+            return None
+        new_id = cursor.lastrowid
+        await self.connection.execute(
+            "INSERT INTO playlist_track(playlist_id, url, title, author, added_by) \
+            SELECT ?, url, title, author, ? \
+            FROM playlist_track \
+            WHERE playlist_id = ? \
+            ORDER BY track_id",
+            (new_id, user.id, playlist_id),
+        )
+        await self.connection.commit()
+        return new_id
+
+    async def get_playlists(
+        self, user: discord.abc.User, guild: discord.Guild | None = None
+    ) -> list[Playlist]:
+        """The user's playlists, then with guild that server's playlists, each by name."""
         assert self.connection is not None
         cursor = await self.connection.execute(
-            "SELECT name \
+            f"SELECT {PLAYLIST_COLUMNS} \
             FROM playlist \
-            WHERE user_id = ? \
-            ORDER BY name",
-            (user.id,),
+            WHERE (user_id = ? AND guild_id IS NULL) OR guild_id = ? \
+            ORDER BY guild_id IS NOT NULL, name",
+            (user.id, guild.id if guild else None),
         )
         rows = await cursor.fetchall()
-        return [row[0] for row in rows]
+        return [Playlist(row[0], row[1], row[2], row[3], bool(row[4])) for row in rows]
 
-    async def get_playlist_id(self, user: discord.abc.User, name: str) -> int | None:
+    async def find_playlists(
+        self, user: discord.abc.User, guild: discord.Guild | None, name: str
+    ) -> list[Playlist]:
+        """The user's playlist and the server's playlist called name, whichever exist."""
+        return [
+            playlist
+            for playlist in await self.get_playlists(user, guild)
+            if playlist.name.casefold() == name.casefold()
+        ]
+
+    async def get_playlist(self, playlist_id: int) -> Playlist | None:
         assert self.connection is not None
         cursor = await self.connection.execute(
-            "SELECT playlist_id \
-            FROM playlist \
-            WHERE user_id = ? AND name = ?",
-            (user.id, name),
+            f"SELECT {PLAYLIST_COLUMNS} FROM playlist WHERE playlist_id = ?",
+            (playlist_id,),
         )
         row = await cursor.fetchone()
-        return row[0] if row else None
+        return Playlist(row[0], row[1], row[2], row[3], bool(row[4])) if row else None
+
+    async def count_guild_playlists(self, guild: discord.Guild) -> int:
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "SELECT COUNT(*) FROM playlist WHERE guild_id = ?", (guild.id,)
+        )
+        return (await cursor.fetchone())[0]
+
+    async def set_playlist_locked(self, playlist_id: int, locked: bool) -> None:
+        assert self.connection is not None
+        await self.connection.execute(
+            "UPDATE playlist SET locked = ? WHERE playlist_id = ?", (locked, playlist_id)
+        )
+        await self.connection.commit()
 
     async def add_playlist_tracks(
-        self, playlist_id: int, tracks: list[tuple[str, str, str]]
+        self,
+        playlist_id: int,
+        tracks: list[tuple[str, str, str]],
+        added_by: discord.abc.User,
     ) -> int:
         """tracks is a list of (url, title, author). Tracks already in the playlist are
         skipped, returns how many were added."""
         assert self.connection is not None
         cursor = await self.connection.executemany(
-            "INSERT OR IGNORE INTO playlist_track(playlist_id, url, title, author) \
-            VALUES(?, ?, ?, ?)",
-            [(playlist_id, *track) for track in tracks],
+            "INSERT OR IGNORE INTO playlist_track(playlist_id, url, title, author, added_by) \
+            VALUES(?, ?, ?, ?, ?)",
+            [(playlist_id, *track, added_by.id) for track in tracks],
         )
         await self.connection.commit()
         return cursor.rowcount
@@ -326,6 +426,17 @@ class Database:
         rows = await cursor.fetchall()
         return [(row[0], row[1], row[2], row[3]) for row in rows]
 
+    async def get_track_adders(self, playlist_id: int) -> dict[int, int]:
+        """Returns track id: id of the user who saved it, for tracks where that's known."""
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "SELECT track_id, added_by \
+            FROM playlist_track \
+            WHERE playlist_id = ? AND added_by IS NOT NULL",
+            (playlist_id,),
+        )
+        return dict(await cursor.fetchall())
+
     async def delete_playlist_track(self, playlist_id: int, track_id: int) -> bool:
         assert self.connection is not None
         cursor = await self.connection.execute(
@@ -336,27 +447,35 @@ class Database:
         await self.connection.commit()
         return cursor.rowcount > 0
 
-    async def get_playlist_summaries(self, user: discord.abc.User) -> list[tuple[str, int]]:
-        """Returns (name, track count) for each of the user's playlists."""
+    async def get_playlist_summaries(
+        self, user: discord.abc.User | None = None, guild: discord.Guild | None = None
+    ) -> list[tuple[Playlist, int]]:
+        """Returns (playlist, track count) for each of the user's playlists, or with guild
+        each of that server's."""
         assert self.connection is not None
+        if guild is not None:
+            where, params = "p.guild_id = ?", (guild.id,)
+        else:
+            assert user is not None
+            where, params = "p.user_id = ? AND p.guild_id IS NULL", (user.id,)
         cursor = await self.connection.execute(
-            "SELECT p.name, COUNT(t.track_id) \
+            f"SELECT p.playlist_id, p.name, p.user_id, p.guild_id, p.locked, COUNT(t.track_id) \
             FROM playlist p \
             LEFT JOIN playlist_track t ON t.playlist_id = p.playlist_id \
-            WHERE p.user_id = ? \
+            WHERE {where} \
             GROUP BY p.playlist_id \
             ORDER BY p.name",
-            (user.id,),
+            params,
         )
         rows = await cursor.fetchall()
-        return [(row[0], row[1]) for row in rows]
+        return [
+            (Playlist(row[0], row[1], row[2], row[3], bool(row[4])), row[5]) for row in rows
+        ]
 
-    async def delete_playlist(self, user: discord.abc.User, name: str) -> bool:
+    async def delete_playlist(self, playlist_id: int) -> bool:
         assert self.connection is not None
         cursor = await self.connection.execute(
-            "DELETE FROM playlist \
-            WHERE user_id = ? AND name = ?",
-            (user.id, name),
+            "DELETE FROM playlist WHERE playlist_id = ?", (playlist_id,)
         )
         await self.connection.commit()
         return cursor.rowcount > 0

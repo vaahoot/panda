@@ -58,6 +58,38 @@ class Settings(commands.Cog, name="⚙️ Settings"):
         else:
             await ctx.reply(f"Invalid state: `{state}`. Use `on` or `off`.")
 
+    @commands.command(
+        aliases=["spl"], brief="<everyone/mods> Who can create server playlists."
+    )
+    @commands.guild_only()
+    async def serverplaylists(
+        self, ctx: commands.Context, who: str | None = None
+    ) -> None:
+        """Choose whether everyone or only members with Manage Server can create
+        server playlists. Without everyone/mods, shows who can now."""
+        guild = ctx.guild
+        if guild is None:
+            return
+
+        if not who:
+            mods_only = await self.bot.db.get_mods_create_playlists(guild)
+            if mods_only:
+                await ctx.send("Only members with Manage Server can create server playlists.")
+            else:
+                await ctx.send("Everyone can create server playlists.")
+            return
+
+        await can_manage_guild(ctx)
+
+        if who.lower() == "everyone":
+            await self.bot.db.set_mods_create_playlists(guild, False)
+            await ctx.send("Everyone can create server playlists now.")
+        elif who.lower() == "mods":
+            await self.bot.db.set_mods_create_playlists(guild, True)
+            await ctx.send("Only members with Manage Server can create server playlists now.")
+        else:
+            await ctx.reply(f"Invalid choice: `{who}`. Use `everyone` or `mods`.")
+
     @commands.command(brief="Change the current command prefix.")
     @commands.guild_only()
     async def prefix(self, ctx: commands.Context, prefix: str | None = None) -> None:

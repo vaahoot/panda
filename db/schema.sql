@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS guild(
   guild_id INTEGER PRIMARY KEY,
-  prefix TEXT DEFAULT 'p!'
+  prefix TEXT DEFAULT 'p!',
+  mods_create_playlists INTEGER NOT NULL DEFAULT 0  -- 1 = only Manage Server can create server playlists
 );
 
 CREATE TABLE IF NOT EXISTS guild_image_channel(
@@ -16,13 +17,21 @@ CREATE TABLE IF NOT EXISTS discord_user(
   cr_tag TEXT                    -- their Clash Royale player tag, e.g. #2PP, NULL = not set
 );
 
+-- A playlist belongs to a user, or with guild_id set to a server. guild_id doesn't reference
+-- guild on purpose: that row is deleted when the bot leaves, server playlists are kept
 CREATE TABLE IF NOT EXISTS playlist(
   playlist_id INTEGER PRIMARY KEY,
-  user_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,           -- the owner, or whoever created a server playlist
+  guild_id INTEGER,                   -- NULL = personal playlist
   name TEXT NOT NULL COLLATE NOCASE,
-  UNIQUE(user_id, name),
+  locked INTEGER NOT NULL DEFAULT 0,  -- server playlists: 1 = only the creator and mods can edit
   FOREIGN KEY(user_id) REFERENCES discord_user(user_id) ON DELETE CASCADE
 );
+
+-- Names are unique among a user's playlists and among a server's, a user's playlist and a
+-- server playlist can share a name
+CREATE UNIQUE INDEX IF NOT EXISTS playlist_user_name ON playlist(user_id, name) WHERE guild_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS playlist_guild_name ON playlist(guild_id, name) WHERE guild_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS playlist_track(
   track_id INTEGER PRIMARY KEY,
@@ -30,6 +39,7 @@ CREATE TABLE IF NOT EXISTS playlist_track(
   url TEXT NOT NULL,
   title TEXT,
   author TEXT,
+  added_by INTEGER,              -- user id, NULL = saved before this was recorded
   FOREIGN KEY(playlist_id) REFERENCES playlist(playlist_id) ON DELETE CASCADE
 );
 
