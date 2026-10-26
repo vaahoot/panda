@@ -38,6 +38,8 @@ BUTTON_LABEL_LIMIT = 80  # Discord's limit for a button label
 
 # Which playlists a command works on
 ALL, PERSONAL, SERVER = "all", "personal", "server"
+# Typed before a playlist name to pick the server's or your own, e.g. `view !party`
+SERVER_PREFIX, PERSONAL_PREFIX = "!", "."
 
 
 def is_mod(user: discord.abc.User) -> bool:
@@ -59,6 +61,35 @@ def can_edit(user: discord.abc.User, playlist: Playlist) -> bool:
     )
 
 
+def split_prefix(name: str) -> tuple[str | None, str]:
+    """The scope a name's prefix asks for, None without one, and the name without it."""
+    if name.startswith(SERVER_PREFIX):
+        return SERVER, name[len(SERVER_PREFIX) :].strip()
+    if name.startswith(PERSONAL_PREFIX):
+        return PERSONAL, name[len(PERSONAL_PREFIX) :].strip()
+    return None, name
+
+
+def in_scope(playlist: Playlist, scope: str) -> bool:
+    if scope == PERSONAL:
+        return playlist.guild_id is None
+    if scope == SERVER:
+        return playlist.guild_id is not None
+    return True
+
+
+def find_named(playlists: list[Playlist], name: str) -> list[Playlist]:
+    """The playlists called name, only the server's or your own when it has a prefix.
+    A name that only matches with its prefix, from before prefixes, still finds that one."""
+    scope, bare = split_prefix(name)
+    matches = [
+        p
+        for p in playlists
+        if p.name.casefold() == bare.casefold() and in_scope(p, scope or ALL)
+    ]
+    return matches or [p for p in playlists if p.name.casefold() == name.casefold()]
+
+
 def bold_name(playlist: Playlist) -> str:
     """The playlist's name for messages, marked when it's a server playlist."""
     if playlist.guild_id is None:
@@ -72,7 +103,8 @@ def error_embed(description: str) -> discord.Embed:
 
 class Playlists(commands.Cog, name="💿 Playlists"):
     """Your own playlists work in every server, server playlists are shared by everyone in
-    one server. Commands work on both, you'll be asked when a name matches one of each."""
+    one server. Commands work on both, you'll be asked when a name matches one of each.
+    Start a name with ! for the server's playlist or . for your own, e.g. `view !party`."""
 
     def __init__(self, bot: core.Panda):
         self.bot: core.Panda = bot
@@ -105,17 +137,26 @@ class Playlists(commands.Cog, name="💿 Playlists"):
         name, or when both have one called that, send a dropdown to pick from.
         The dropdown only offers playlists that pass usable, none_usable is the error when
         none do. A typed name skips that check, so on_select can say why it can't be used."""
-        playlists = await self.bot.db.get_playlists(ctx.author, ctx.guild)
-        if scope == PERSONAL:
-            playlists = [p for p in playlists if p.guild_id is None]
-        elif scope == SERVER:
-            playlists = [p for p in playlists if p.guild_id is not None]
+        playlists = [
+            p
+            for p in await self.bot.db.get_playlists(ctx.author, ctx.guild)
+            if in_scope(p, scope)
+        ]
 
         if name is not None:
             name = name.strip()
-            matches = [p for p in playlists if p.name.casefold() == name.casefold()]
+            matches = find_named(playlists, name)
             if not matches:
-                await ctx.reply(embed=error_embed(self.not_found(ctx, name, scope)))
+                prefix_scope, bare = split_prefix(name)
+                if prefix_scope is not None and scope not in (ALL, prefix_scope):
+                    # e.g. share, which only takes your own playlists, with #name
+                    kind = "your own" if scope == PERSONAL else "server"
+                    message = f"This command only works on {kind} playlists."
+                elif prefix_scope == SERVER and ctx.guild is None:
+                    message = "Server playlists only work in a server."
+                else:
+                    message = self.not_found(ctx, bare, prefix_scope or scope)
+                await ctx.reply(embed=error_embed(message))
                 return
             if len(matches) == 1:
                 await on_select(matches[0])
@@ -124,7 +165,9 @@ class Playlists(commands.Cog, name="💿 Playlists"):
                 title=matches[0].name,
                 description=(
                     "You and this server both have a playlist with this name, "
-                    "which one do you mean?"
+                    "which one do you mean?\n\n"
+                    f"Skip this next time with `{SERVER_PREFIX}{matches[0].name}` "
+                    f"for the server's or `{PERSONAL_PREFIX}{matches[0].name}` for yours."
                 ),
                 color=settings.MAIN_COLOR,
             )
@@ -220,6 +263,22 @@ class Playlists(commands.Cog, name="💿 Playlists"):
             )
             return False
         return True
+
+    async def check_name(self, ctx: commands.Context, name: str) -> bool:
+        """Whether a new playlist name can be used, replies if not."""
+        if not name:
+            message = "Give the playlist a name."
+        elif len(name) > PLAYLIST_NAME_LIMIT:
+            message = f"Playlist names can be at most {PLAYLIST_NAME_LIMIT} characters."
+        elif name.startswith((SERVER_PREFIX, PERSONAL_PREFIX)):
+            message = (
+                f"Playlist names can't start with `{SERVER_PREFIX}` or `{PERSONAL_PREFIX}`, "
+                "those pick a server playlist or your own."
+            )
+        else:
+            return True
+        await ctx.reply(embed=error_embed(message))
+        return False
 
     async def save_to_playlist(
         self, ctx: commands.Context, playlist: Playlist, link: str
@@ -603,10 +662,24 @@ class Playlists(commands.Cog, name="💿 Playlists"):
         await ctx.send(embed=embed)
 
     async def rename_playlist(
-        self, ctx: commands.Context, playlist: Playlist, new_name: str
+        self,
+        ctx: commands.Context,
+        playlist: Playlist,
+        new_name: str,
+        new_scope: str | None,
     ) -> None:
+        """new_scope is what a prefix on the new name asked for, renaming can't change it."""
         current = await self.refresh(ctx, playlist)
         if current is None or not await self.check_manage(ctx, current, "rename"):
+            return
+        if new_scope is not None and not in_scope(current, new_scope):
+            kind = "a server" if current.guild_id is not None else "your own"
+            await ctx.reply(
+                embed=error_embed(
+                    f"{bold_name(current)} is {kind} playlist, renaming can't change that. "
+                    f"Use `{ctx.clean_prefix}share` or `{ctx.clean_prefix}copy` instead."
+                )
+            )
             return
         if current.name == new_name:
             await ctx.reply(
@@ -634,18 +707,25 @@ class Playlists(commands.Cog, name="💿 Playlists"):
     async def create(self, ctx: commands.Context, *, name: str) -> None:
         """Create a new playlist with the given name.
         In a server you choose whether it's just yours, playable in any server,
-        or a server playlist everyone here can play and add to."""
-        name = name.strip()
-
-        if len(name) > PLAYLIST_NAME_LIMIT:
-            await ctx.reply(
-                embed=error_embed(
-                    f"Playlist names can be at most {PLAYLIST_NAME_LIMIT} characters."
-                )
-            )
+        or a server playlist everyone here can play and add to.
+        Start the name with ! for a server playlist or . for your own to skip the question."""
+        scope, name = split_prefix(name.strip())
+        if not await self.check_name(ctx, name):
             return
 
         guild = ctx.guild
+        if scope == SERVER:
+            if guild is None:
+                await ctx.reply(
+                    embed=error_embed("Server playlists can only be created in a server.")
+                )
+                return
+            await self.create_server(ctx, name)
+            return
+        if scope == PERSONAL:
+            await self.create_personal(ctx, name)
+            return
+
         if guild is None or (
             await self.bot.db.get_mods_create_playlists(guild) and not is_mod(ctx.author)
         ):
@@ -946,7 +1026,6 @@ class Playlists(commands.Cog, name="💿 Playlists"):
             new_name = new_name[3:]
         else:
             playlists = await self.bot.db.get_playlists(ctx.author, ctx.guild)
-            names = {p.name.casefold() for p in playlists}
             splits = [
                 (args[: m.start()].strip(), args[m.end() :])
                 for m in re.finditer(r"\s+to\s+", args, re.IGNORECASE)
@@ -960,29 +1039,21 @@ class Playlists(commands.Cog, name="💿 Playlists"):
                 return
             # The first split with an existing playlist, else the first one says it's not found
             name, new_name = next(
-                (s for s in splits if s[0].casefold() in names), splits[0]
+                (s for s in splits if find_named(playlists, s[0])), splits[0]
             )
-        new_name = new_name.strip()
-
-        if not new_name:
-            await ctx.reply(embed=error_embed("Give the playlist a new name."))
-            return
-        if len(new_name) > PLAYLIST_NAME_LIMIT:
-            await ctx.reply(
-                embed=error_embed(
-                    f"Playlist names can be at most {PLAYLIST_NAME_LIMIT} characters."
-                )
-            )
+        new_scope, new_name = split_prefix(new_name.strip())
+        if not await self.check_name(ctx, new_name):
             return
 
         async def on_select(playlist: Playlist) -> None:
-            await self.rename_playlist(ctx, playlist, new_name)
+            await self.rename_playlist(ctx, playlist, new_name, new_scope)
 
         await self.choose_playlist(
             ctx,
             name,
             f"Pick a playlist to rename to **{new_name}**.",
             on_select,
+            scope=new_scope or ALL,
             usable=lambda p: can_manage(ctx.author, p),
         )
 
