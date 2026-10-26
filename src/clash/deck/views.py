@@ -8,8 +8,6 @@ from clash.profile_view import clan_link, player_link
 from config import settings
 
 from . import generate_image
-from .get_deck import RANKED
-
 DECK_IMAGE_FILENAME = "deck.png"
 
 
@@ -26,8 +24,8 @@ def player_text(name: str, name_tag: str | None, clan: str | None, clan_tag: str
 
 
 def first_mode(decks: dict[str, list[dict]]) -> str:
-    """Ranked when the player has a ranked deck, otherwise whatever they do have."""
-    return RANKED if RANKED in decks else next(iter(decks))
+    """The first mode the player has a deck for: 20 wins, then ranked, then ladder."""
+    return next(iter(decks))
 
 
 class DeckModeSelect(discord.ui.Select):
@@ -46,8 +44,8 @@ class DeckModeSelect(discord.ui.Select):
 
 
 class DeckView(discord.ui.LayoutView):
-    """The player's name and clan with the deck image below. When they have both ranked and
-    ladder decks, a menu switches between them. Images are built the first time a mode is
+    """The player's name and clan with the deck image below. When they have decks for more
+    than one mode (20 wins, ranked, ladder), a menu switches between them. Images are built the first time a mode is
     picked and reused after that."""
 
     def __init__(

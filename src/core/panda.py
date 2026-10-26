@@ -236,7 +236,7 @@ class Panda(commands.Bot):
         view = deck_views.DeckView(decks, mode, image, name, name_tag, clan, clan_tag)
         view.message = await message.reply(file=file, view=view)
         if len(decks) > 1:
-            # Both ranked and ladder decks: ranked is showing, get the other one ready
+            # More than one mode: the first is showing, get the others ready
             view.prebuild()
 
     async def search_by_screenshot(self, message: discord.Message) -> None:

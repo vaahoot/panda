@@ -8,7 +8,7 @@ from PIL import Image
 
 import log
 import net
-from config import paths
+from config import paths, settings
 
 # Everything that can go wrong getting one card image. PIL raises OSError for anything it
 # can't decode (UnidentifiedImageError is one) and aiohttp for failed downloads
@@ -71,8 +71,13 @@ async def fetch_card_image(card: dict, key: str) -> Image.Image:
     return await fetch_image(url, card_image_file(card.get("id", "unknown"), key, url))
 
 
+TWENTY_WINS = "20 Wins"
 RANKED = "Ranked"
 LADDER = "Ladder"
+
+
+def is_twenty_wins(battle: dict) -> bool:
+    return battle.get("eventTag") in settings.TWENTY_WIN_EVENT_TAGS
 
 
 def is_ranked(battle: dict) -> bool:
@@ -89,12 +94,12 @@ def is_ladder(battle: dict) -> bool:
     return (battle.get("gameMode") or {}).get("name") in LADDER_GAME_MODES
 
 
-# Ranked first: that's the deck shown first when a player has both
-DECK_MODES = {RANKED: is_ranked, LADDER: is_ladder}
+# In the order the menu lists them. The first one the player has is the deck shown first
+DECK_MODES = {TWENTY_WINS: is_twenty_wins, RANKED: is_ranked, LADDER: is_ladder}
 
 
 async def get_last_decks(data: list[dict] | None) -> dict[str, list[dict]]:
-    """The deck of the most recent battle of each mode, ranked first. Modes without a battle
+    """The deck of the most recent battle of each mode, in DECK_MODES order. Modes without a battle
     in the log are left out, so an empty dict means there's no deck to show."""
     battles = {}
     for mode, matches in DECK_MODES.items():
