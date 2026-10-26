@@ -45,8 +45,8 @@ def is_mod(user: discord.abc.User) -> bool:
 
 
 def can_manage(user: discord.abc.User, playlist: Playlist) -> bool:
-    """Whether the user can delete, lock or unlock the playlist: their own, or a server
-    playlist they created or they're a mod in."""
+    """Whether the user can delete, rename, lock or unlock the playlist: their own, or a
+    server playlist they created or they're a mod in."""
     return playlist.user_id == user.id or (
         playlist.guild_id is not None and is_mod(user)
     )
@@ -602,6 +602,34 @@ class Playlists(commands.Cog, name="💿 Playlists"):
         )
         await ctx.send(embed=embed)
 
+    async def rename_playlist(
+        self, ctx: commands.Context, playlist: Playlist, new_name: str
+    ) -> None:
+        current = await self.refresh(ctx, playlist)
+        if current is None or not await self.check_manage(ctx, current, "rename"):
+            return
+        if current.name == new_name:
+            await ctx.reply(
+                embed=error_embed(f"{bold_name(current)} is already called that.")
+            )
+            return
+        if not await self.bot.db.rename_playlist(current.playlist_id, new_name):
+            owner = (
+                "You already have" if current.guild_id is None else "This server already has"
+            )
+            await ctx.reply(
+                embed=error_embed(f"{owner} a playlist called **{new_name}**.")
+            )
+            return
+        embed = discord.Embed(
+            description=(
+                f"Renamed {bold_name(current)} to "
+                f"{bold_name(current._replace(name=new_name))}."
+            ),
+            color=settings.MAIN_COLOR,
+        )
+        await ctx.send(embed=embed)
+
     @commands.command(brief="<name> Create a new playlist.")
     async def create(self, ctx: commands.Context, *, name: str) -> None:
         """Create a new playlist with the given name.
@@ -905,6 +933,57 @@ class Playlists(commands.Cog, name="💿 Playlists"):
             "Pick a server playlist to copy to your playlists.",
             on_select,
             scope=SERVER,
+        )
+
+    @commands.command(brief="[name] to <new name> Rename a playlist.")
+    async def rename(self, ctx: commands.Context, *, args: str) -> None:
+        """Rename a playlist, e.g. `rename old name to new name`.
+        Server playlists can be renamed by their creator and members with Manage Server.
+        Without the old name, e.g. `rename to new name`, you'll get a menu to pick from."""
+        # Names can contain " to " themselves, so split where the old name is a playlist
+        name, new_name = None, args.strip()
+        if new_name.casefold().startswith("to "):
+            new_name = new_name[3:]
+        else:
+            playlists = await self.bot.db.get_playlists(ctx.author, ctx.guild)
+            names = {p.name.casefold() for p in playlists}
+            splits = [
+                (args[: m.start()].strip(), args[m.end() :])
+                for m in re.finditer(r"\s+to\s+", args, re.IGNORECASE)
+            ]
+            if not splits:
+                await ctx.reply(
+                    embed=error_embed(
+                        f"Use `{ctx.clean_prefix}rename <name> to <new name>`."
+                    )
+                )
+                return
+            # The first split with an existing playlist, else the first one says it's not found
+            name, new_name = next(
+                (s for s in splits if s[0].casefold() in names), splits[0]
+            )
+        new_name = new_name.strip()
+
+        if not new_name:
+            await ctx.reply(embed=error_embed("Give the playlist a new name."))
+            return
+        if len(new_name) > PLAYLIST_NAME_LIMIT:
+            await ctx.reply(
+                embed=error_embed(
+                    f"Playlist names can be at most {PLAYLIST_NAME_LIMIT} characters."
+                )
+            )
+            return
+
+        async def on_select(playlist: Playlist) -> None:
+            await self.rename_playlist(ctx, playlist, new_name)
+
+        await self.choose_playlist(
+            ctx,
+            name,
+            f"Pick a playlist to rename to **{new_name}**.",
+            on_select,
+            usable=lambda p: can_manage(ctx.author, p),
         )
 
 

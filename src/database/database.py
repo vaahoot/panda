@@ -382,6 +382,16 @@ class Database:
         )
         await self.connection.commit()
 
+    async def rename_playlist(self, playlist_id: int, name: str) -> bool:
+        """Returns False if the owner or server already has a playlist called name."""
+        assert self.connection is not None
+        cursor = await self.connection.execute(
+            "UPDATE OR IGNORE playlist SET name = ? WHERE playlist_id = ?",
+            (name, playlist_id),
+        )
+        await self.connection.commit()
+        return cursor.rowcount > 0
+
     async def add_playlist_tracks(
         self,
         playlist_id: int,
