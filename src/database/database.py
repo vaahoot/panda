@@ -12,33 +12,46 @@ from config.settings import DEFAULT_PREFIX
 
 BUSY_TIMEOUT_SECONDS = 30
 
-# Keeps battlelog_checked_at so the crawler's progress isn't reset by updates. Every save
-# confirms the name and clan, so it also stamps updated_at
+# A stored clan encountered again has its members re-crawled once its last check is this old
+CLAN_RECHECK_SECONDS = 24 * 3600
+
+# Keeps battlelog_checked_at so the crawler's progress isn't reset by updates
 UPSERT_PLAYER = """
-    INSERT INTO cr_player(tag, name, clan_tag, clan_name, search_name, updated_at)
-    VALUES(?, ?, ?, ?, ?, unixepoch())
+    INSERT INTO cr_player(tag, name, clan_tag, clan_name, search_name) VALUES(?, ?, ?, ?, ?)
     ON CONFLICT(tag) DO UPDATE SET
         name = excluded.name,
         clan_tag = excluded.clan_tag,
         clan_name = excluded.clan_name,
-        search_name = excluded.search_name,
-        updated_at = excluded.updated_at
+        search_name = excluded.search_name
 """
 
-UPSERT_CLAN = """
+# Encountering a clan that wasn't checked within CLAN_RECHECK_SECONDS queues its members for the
+# crawler again (NULL = pending), so clans stay fresh wherever they keep showing up
+UPSERT_CLAN = f"""
     INSERT INTO cr_clan(tag, name, search_name) VALUES(?, ?, ?)
     ON CONFLICT(tag) DO UPDATE SET
         name = excluded.name,
-        search_name = excluded.search_name
+        search_name = excluded.search_name,
+        members_checked_at = CASE
+            WHEN members_checked_at < unixepoch() - {CLAN_RECHECK_SECONDS} THEN NULL
+            ELSE members_checked_at
+        END
 """
 
 # Columns added after their table was first created: (table, column, type)
 ADDED_COLUMNS = [
     ("cr_player", "clan_tag", "TEXT"),
     ("cr_clan", "search_name", "TEXT"),
-    ("cr_player", "updated_at", "INTEGER"),
     ("guild", "mods_create_playlists", "INTEGER NOT NULL DEFAULT 0"),
     ("playlist_track", "added_by", "INTEGER"),
+]
+
+# Indexes no longer in the schema, CREATE INDEX IF NOT EXISTS doesn't remove them
+DROPPED_INDEXES = ["cr_player_clanless_updated", "cr_player_pending", "cr_clan_checked_at"]
+
+# Columns removed from their table: (table, column). Their indexes go in DROPPED_INDEXES
+DROPPED_COLUMNS = [
+    ("cr_player", "updated_at"),
 ]
 
 PLAYLIST_COLUMNS = "playlist_id, name, user_id, guild_id, locked"
@@ -98,7 +111,8 @@ class Database:
             await log.warning(f"Couldn't switch the database to WAL mode yet: {e}")
 
     async def migrate(self) -> None:
-        """Adds columns to tables created before them, CREATE TABLE IF NOT EXISTS doesn't."""
+        """Adds and removes columns and indexes in tables created before the schema changed,
+        CREATE ... IF NOT EXISTS doesn't."""
         assert self.connection is not None
         for table, column, column_type in ADDED_COLUMNS:
             cursor = await self.connection.execute(f"PRAGMA table_info({table})")
@@ -106,6 +120,14 @@ class Database:
             # No columns = table doesn't exist yet, the schema creates it with the column
             if columns and column not in columns:
                 await self.connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
+        for index in DROPPED_INDEXES:
+            await self.connection.execute(f"DROP INDEX IF EXISTS {index}")
+        for table, column in DROPPED_COLUMNS:
+            cursor = await self.connection.execute(f"PRAGMA table_info({table})")
+            if column in {row[1] for row in await cursor.fetchall()}:
+                # Rewrites every row once, ~30s for 14M players on an SSD
+                await log.info(f"Removing {table}.{column}, this takes a while on a big table")
+                await self.connection.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
         await self.connection.commit()
         await self.migrate_playlist_table()
 
