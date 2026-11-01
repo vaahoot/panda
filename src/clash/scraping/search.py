@@ -221,8 +221,8 @@ async def get_player_entry(tag: str, battles: list[dict]) -> dict | None:
 
 async def decks_from_battle_log(
     db: Database, tag: str, battles: list[dict]
-) -> tuple[dict[str, list[dict]], dict | None]:
-    """The player's latest decks by mode (see get_deck.get_last_decks) and their name, tag and
+) -> tuple[dict[str, list[list[dict]]], dict | None]:
+    """The player's decks by mode (see get_deck.get_last_decks) and their name, tag and
     clan (see get_player_entry)."""
     # Adds players found by the fallback searches and refreshes stale names/clans
     try:
@@ -234,7 +234,7 @@ async def decks_from_battle_log(
 
 async def find_deck(
     db: Database, name: str, clan: str | None
-) -> tuple[dict[str, list[dict]], dict | None] | None:
+) -> tuple[dict[str, list[list[dict]]], dict | None] | None:
     """See decks_from_battle_log. None if not found."""
     tag = await find_tag(db, name, clan)
     if not tag:
@@ -246,7 +246,7 @@ async def find_deck(
 
 async def find_deck_by_tag(
     db: Database, tag: str
-) -> tuple[dict[str, list[dict]], dict | None] | None:
+) -> tuple[dict[str, list[list[dict]]], dict | None] | None:
     """See decks_from_battle_log. None if no player has this tag."""
     try:
         battles = await get_battle_log(tag)

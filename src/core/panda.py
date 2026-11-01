@@ -224,19 +224,20 @@ class Panda(commands.Bot):
         await message.reply(embed=embed)
 
     async def reply_with_decks(
-        self, decks: dict[str, list[dict]], info: PlayerInfo, message: discord.Message
+        self, decks: dict[str, list[list[dict]]], info: PlayerInfo, message: discord.Message
     ) -> None:
         name, name_tag, clan, clan_tag = info
-        for deck_mode, deck in decks.items():
-            await log.info(f"Found {deck_mode} deck for {name}: {[card['name'] for card in deck]}")
+        for deck_mode, mode_decks in decks.items():
+            for deck in mode_decks:
+                await log.info(f"Found {deck_mode} deck for {name}: {[card['name'] for card in deck]}")
         mode = deck_views.first_mode(decks)
-        image = (await generate_image.build_deck_image(decks[mode])).getvalue()
+        image = (await generate_image.build_deck_image(decks[mode][0])).getvalue()
 
         file = discord.File(io.BytesIO(image), filename=deck_views.DECK_IMAGE_FILENAME)
         view = deck_views.DeckView(decks, mode, image, name, name_tag, clan, clan_tag)
         view.message = await message.reply(file=file, view=view)
-        if len(decks) > 1:
-            # More than one mode: the first is showing, get the others ready
+        if view.has_controls():
+            # More than one deck: the first is showing, get the others ready
             view.prebuild()
 
     async def search_by_screenshot(self, message: discord.Message) -> None:

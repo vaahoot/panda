@@ -98,19 +98,33 @@ def is_ladder(battle: dict) -> bool:
 DECK_MODES = {TWENTY_WINS: is_twenty_wins, RANKED: is_ranked, LADDER: is_ladder}
 
 
-async def get_last_decks(data: list[dict] | None) -> dict[str, list[dict]]:
-    """The deck of the most recent battle of each mode, in DECK_MODES order. Modes without a battle
-    in the log are left out, so an empty dict means there's no deck to show."""
-    battles = {}
+def deck_key(cards: list[dict]) -> frozenset:
+    """Same cards with the same evolutions is the same deck, whatever order they're in."""
+    return frozenset((card.get("id", card.get("name")), card.get("evolutionLevel")) for card in cards)
+
+
+async def get_last_decks(data: list[dict] | None) -> dict[str, list[list[dict]]]:
+    """Each mode's different decks in the battle log, most recently played first, in DECK_MODES
+    order. Modes without a battle in the log are left out, so an empty dict means there's no deck to show."""
+    battles: dict[str, list[list[dict]]] = {}
     for mode, matches in DECK_MODES.items():
-        battle = next((b for b in data or [] if matches(b)), None)
-        if battle is not None:
-            battles[mode] = battle["team"][0]["cards"]
+        seen = set()
+        for battle in data or []:
+            if not matches(battle):
+                continue
+            cards = battle["team"][0]["cards"]
+            key = deck_key(cards)
+            if key not in seen:
+                seen.add(key)
+                battles.setdefault(mode, []).append(cards)
 
     decks = await asyncio.gather(
-        *(asyncio.gather(*(get_card_info(card) for card in cards)) for cards in battles.values())
+        *(
+            asyncio.gather(*(asyncio.gather(*(get_card_info(card) for card in cards)) for cards in mode_decks))
+            for mode_decks in battles.values()
+        )
     )
-    return {mode: list(deck) for mode, deck in zip(battles, decks)}
+    return {mode: [list(deck) for deck in mode_decks] for mode, mode_decks in zip(battles, decks)}
 
 
 async def get_card_info(card: dict) -> dict:
