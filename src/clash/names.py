@@ -17,6 +17,9 @@ DECORATION_RANGES = (
 LOOKALIKES = str.maketrans({
     "đ": "d", "ð": "d", "ø": "o", "ł": "l", "ħ": "h", "ŧ": "t", "ı": "i",
     "ß": "ss", "æ": "ae", "œ": "oe", "þ": "th",
+    # Small capitals ("ɪᴍʙᴀᴛᴍᴀɴ"), which NFKC leaves alone. Unicode has no small capital X
+    **dict(zip("ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘꞯʀꜱᴛᴜᴠᴡʏᴢ", "abcdefghijklmnopqrstuvwyz")),
+    "ᴁ": "ae", "ɶ": "oe",
 })
 
 
