@@ -234,9 +234,14 @@ class Panda(commands.Bot):
         image = (await generate_image.build_deck_image(decks[mode][0])).getvalue()
 
         file = discord.File(io.BytesIO(image), filename=deck_views.DECK_IMAGE_FILENAME)
-        view = deck_views.DeckView(decks, mode, image, name, name_tag, clan, clan_tag)
+        # Imported here because the cog imports core
+        from cogs.royale import COG_NAME as ROYALE_COG
+
+        royale = self.get_cog(ROYALE_COG)
+        profile = royale.profile_view if royale else None  # type: ignore[attr-defined]
+        view = deck_views.DeckView(decks, mode, image, name, name_tag, clan, clan_tag, profile)
         view.message = await message.reply(file=file, view=view)
-        if view.has_controls():
+        if view.has_other_decks():
             # More than one deck: the first is showing, get the others ready
             view.prebuild()
 

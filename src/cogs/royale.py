@@ -11,9 +11,11 @@ from clash.profile_view import ProfileView
 from config import settings
 
 USER_MENTION = re.compile(r"<@!?\d+>")
+# Panda.get_cog finds the cog by it, for the deck view's profile button
+COG_NAME = "👑 Royale"
 
 
-class Royale(commands.Cog, name="👑 Royale"):
+class Royale(commands.Cog, name=COG_NAME):
     """Clash Royale players and profiles."""
 
     def __init__(self, bot: core.Panda):
@@ -43,16 +45,22 @@ class Royale(commands.Cog, name="👑 Royale"):
             await ctx.reply(embed=embed)
             return None
 
-        try:
-            player = await cr_player.get_player(normalised)
-        except aiohttp.ClientResponseError as e:
-            if e.status != 404:
-                raise
+        player = await self.get_player(normalised)
+        if player is None:
             embed = discord.Embed(
                 description=f"No player found with the tag `{normalised}`.",
                 color=settings.ERROR_COLOR,
             )
             await ctx.reply(embed=embed)
+        return player
+
+    async def get_player(self, tag: str) -> dict | None:
+        """The player with this (normalised) tag from the CR API, None if there's no such player."""
+        try:
+            player = await cr_player.get_player(tag)
+        except aiohttp.ClientResponseError as e:
+            if e.status != 404:
+                raise
             return None
 
         # Makes the player findable by deck search, and their clan crawlable
@@ -61,6 +69,11 @@ class Royale(commands.Cog, name="👑 Royale"):
             player["tag"], player["name"], clan.get("tag"), clan.get("name")
         )
         return player
+
+    async def profile_view(self, tag: str) -> ProfileView | None:
+        """The profile of the player with this (normalised) tag, None if there's no such player."""
+        player = await self.get_player(tag)
+        return ProfileView(player, self.emojis) if player else None
 
     @commands.command(brief="<tag> Show or set your Clash Royale tag.")
     async def mytag(self, ctx: commands.Context, tag: str | None = None) -> None:

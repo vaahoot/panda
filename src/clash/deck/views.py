@@ -1,5 +1,6 @@
 import asyncio
 import io
+from collections.abc import Awaitable, Callable
 
 import discord
 
@@ -48,11 +49,25 @@ class DeckPageButton(discord.ui.Button):
         await view.show(interaction, view.mode, view.index + self.step)
 
 
+class ProfileButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Profile", style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: DeckView = self.view  # type: ignore
+        await view.send_profile(interaction)
+
+
+# Builds the profile of the player with this tag, None if there's no such player
+ProfileBuilder = Callable[[str], Awaitable[discord.ui.LayoutView | None]]
+
+
 class DeckView(discord.ui.LayoutView):
     """The player's name and clan with the deck image below. When they have decks for more
     than one mode (20 wins, ranked, ladder), a menu switches between them, and when a mode has
-    more than one deck, arrows above the menu page through them. Images are built the first time
-    a deck is shown and reused after that."""
+    more than one deck, arrows above the menu page through them, next to a button that sends the
+    player's profile as a new message. Images are built the first time a deck is shown and
+    reused after that."""
 
     def __init__(
         self,
@@ -63,9 +78,13 @@ class DeckView(discord.ui.LayoutView):
         name_tag: str | None,
         clan: str | None,
         clan_tag: str | None,
+        profile: ProfileBuilder | None = None,
     ):
         super().__init__(timeout=300)
         self.decks = decks
+        self.name_tag = name_tag
+        # Without the player's tag there's no profile to show
+        self.profile = profile if name_tag else None
         self.mode = current
         self.index = 0
         self.images: dict[tuple[str, int], bytes] = {(current, 0): current_image}
@@ -88,19 +107,40 @@ class DeckView(discord.ui.LayoutView):
             self.container.add_item(discord.ui.TextDisplay(f"-# {self.mode} deck {self.index + 1}/{count}"))
         if not controls:
             return
+        buttons: list[discord.ui.Button] = []
         if count > 1:
             # Labels can't be bold, these heavy brackets read like a bold < and >
-            self.container.add_item(
-                discord.ui.ActionRow(
-                    DeckPageButton("❮", -1, self.index == 0),
-                    DeckPageButton("❯", 1, self.index == count - 1),
-                )
-            )
+            buttons += [
+                DeckPageButton("❮", -1, self.index == 0),
+                DeckPageButton("❯", 1, self.index == count - 1),
+            ]
+        if self.profile is not None:
+            buttons.append(ProfileButton())
+        if buttons:
+            self.container.add_item(discord.ui.ActionRow(*buttons))
         if len(self.decks) > 1:
             self.container.add_item(discord.ui.ActionRow(DeckModeSelect(list(self.decks), self.mode)))
 
-    def has_controls(self) -> bool:
+    def has_other_decks(self) -> bool:
         return len(self.decks) > 1 or any(len(mode_decks) > 1 for mode_decks in self.decks.values())
+
+    def has_controls(self) -> bool:
+        return self.has_other_decks() or self.profile is not None
+
+    async def send_profile(self, interaction: discord.Interaction) -> None:
+        """Sends the player's profile as a new message, leaving the deck as it is."""
+        assert self.profile is not None and self.name_tag is not None
+        # Acknowledges the click without changing this message, fetching can take a moment
+        await interaction.response.defer()
+        profile = await self.profile(self.name_tag)
+        if profile is None:
+            embed = discord.Embed(
+                description=f"No player found with the tag `{self.name_tag}`.",
+                color=settings.ERROR_COLOR,
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+        await interaction.followup.send(view=profile)
 
     async def show(self, interaction: discord.Interaction, mode: str, index: int) -> None:
         file = await self.image_file(mode, index)
@@ -140,8 +180,9 @@ class DeckView(discord.ui.LayoutView):
     ) -> None:
         # The bot's command error handler doesn't see errors from menus, so report them here
         await log.error(f"Deck menu failed: {type(error).__name__}: {error}")
+        failed = "get the profile" if isinstance(item, ProfileButton) else "switch the deck"
         embed = discord.Embed(
-            description="Couldn't switch the deck. Try again!", color=settings.ERROR_COLOR
+            description=f"Couldn't {failed}. Try again!", color=settings.ERROR_COLOR
         )
         if interaction.response.is_done():
             await interaction.followup.send(embed=embed, ephemeral=True)
@@ -149,7 +190,7 @@ class DeckView(discord.ui.LayoutView):
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
     async def on_timeout(self) -> None:
-        # Keep whichever deck is showing, just drop the arrows and menu. The text and image are
+        # Keep whichever deck is showing, just drop the buttons and menu. The text and image are
         # part of the view too, so it can't be removed altogether
         if self.message is not None and self.has_controls():
             self.render(controls=False)
